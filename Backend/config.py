@@ -9,7 +9,7 @@ class Telegram:
     API_ID = int(getenv("API_ID", "26954495"))
     API_HASH = getenv("API_HASH", "2061c55207cfee4f106ff0dc331fe3d9")
     BOT_TOKEN = getenv("BOT_TOKEN", "8111940661:AAE95cvKg3o5oP3PYbRxIBO7BRYv082It_g")
-    PORT = int(getenv("PORT", "8000"))
+    PORT = int(getenv("PORT", "8080"))
     BASE_URL = getenv("BASE_URL", "0.0.0.0").rstrip('/')
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     DATABASE = getenv("DATABASE", "mongodb+srv://Keshav:Keshav@cluster0.ndw3zfh.mongodb.net/?appName=Cluster0").split(", ")
