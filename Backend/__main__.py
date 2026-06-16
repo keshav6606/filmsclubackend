@@ -1,11 +1,12 @@
 from asyncio import get_event_loop, sleep as asleep
 from traceback import format_exc
 from pyrogram import idle
+from pyrogram.errors import FloodWait
 from Backend import __version__, db
 from Backend.logger import LOGGER
 from Backend.fastapi import server
 from Backend.helper.pyro import restart_notification
-from Backend.pyrofork import StreamBot
+from Backend.pyrofork import StreamBot, multi_clients
 from Backend.pyrofork.clients import initialize_clients
 
 loop = get_event_loop()
@@ -18,7 +19,14 @@ async def start_services():
         await db.connect()
         await asleep(1.2)
         
-        await StreamBot.start()
+        while True:
+            try:
+                await StreamBot.start()
+                break
+            except FloodWait as e:
+                LOGGER.warning(f"FloodWait of {e.value} seconds encountered for StreamBot. Sleeping for {e.value + 5} seconds...")
+                await asleep(e.value + 5)
+        
         StreamBot.username = StreamBot.me.username
         LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
 
@@ -39,7 +47,19 @@ async def start_services():
 async def stop_services():
     try:
         LOGGER.info("Stopping services...")
-        await StreamBot.stop()
+        for client_id, client in list(multi_clients.items()):
+            try:
+                if client.is_connected:
+                    await client.stop()
+            except Exception as ce:
+                LOGGER.error(f"Error stopping client {client_id}: {ce}")
+        
+        try:
+            if StreamBot.is_connected:
+                await StreamBot.stop()
+        except Exception as ce:
+            LOGGER.error(f"Error stopping primary StreamBot: {ce}")
+
         await db.disconnect()
         LOGGER.info("Services stopped successfully.")
     except Exception:
@@ -55,3 +75,4 @@ if __name__ == '__main__':
     finally:
         loop.run_until_complete(stop_services())
         loop.stop()
+
