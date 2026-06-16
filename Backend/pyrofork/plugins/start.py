@@ -205,9 +205,43 @@ async def start(bot: Client, message: Message):
         )
 
 
+@StreamBot.on_message(filters.command('help') & filters.private)
+async def help_command(bot: Client, message: Message):
+    try:
+        is_owner = False
+        if message.from_user:
+            is_owner = (message.from_user.id == Telegram.OWNER_ID)
+        elif message.sender_chat:
+            is_owner = (message.sender_chat.id == Telegram.OWNER_ID)
+
+        if is_owner:
+            help_text = (
+                "🤖 **Available Commands:**\n\n"
+                "🎬 **/start** - Start the bot & get welcome message.\n"
+                "ℹ️ **/help** - Show this help message.\n\n"
+                "⚙️ **Admin Commands (Owner Only):**\n"
+                "👤 **/user `<username> <expiry_days>`** - Create a temporary user.\n"
+                "♻️ **/restart** - Update code from GitHub and restart the bot.\n"
+                "📋 **/log** - Get the system log file (`log.txt`).\n"
+                "💬 **/caption** - Toggle Caption vs Filename mode for indexing.\n"
+                "📽️ **/tmdb** - Toggle metadata provider between TMDb and IMDb.\n"
+                "🆔 **/set `<TMDb-ID>`** - Set default TMDb ID fallback (or `/set` to clear).\n"
+                "🗑️ **/delete `<URL>`** - Delete a movie/TV show from the database."
+            )
+        else:
+            help_text = (
+                "🤖 **Available Commands:**\n\n"
+                "🎬 **/start** - Start the bot & get welcome message.\n"
+                "ℹ️ **/help** - Show this help message."
+            )
+        await message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        LOGGER.error(f"Error in /help command: {e}")
+
+
 
 @StreamBot.on_message(filters.command('log') & filters.private & CustomFilters.owner)
-async def start(bot: Client, message: Message):
+async def get_logs(bot: Client, message: Message):
     try:
         path = ospath.abspath('log.txt')
         return await message.reply_document(
@@ -247,7 +281,7 @@ async def file_receive_handler(bot: Client, message: Message):
         try:
             if message.video or message.document.mime_type.startswith("video/"):
                 file = message.video or message.document
-                if message.caption:
+                if Telegram.USE_CAPTION and message.caption:
                     title = message.caption.replace("\n", "\\n")
                 else:
                     title = file.file_name or file.file_id
