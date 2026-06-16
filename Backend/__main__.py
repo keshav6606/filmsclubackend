@@ -11,14 +11,13 @@ from Backend.pyrofork.clients import initialize_clients
 
 loop = get_event_loop()
 
-async def start_services():
+async def start_telegram():
+    """Start Telegram bots in the background after the web server is running."""
     try:
-        LOGGER.info(f"Initializing Project-Stream v-{__version__}")
-        await asleep(1.2)
-        
+        await asleep(2)  # Give Uvicorn a moment to bind the port
         await db.connect()
         await asleep(1.2)
-        
+
         while True:
             try:
                 await StreamBot.start()
@@ -26,7 +25,7 @@ async def start_services():
             except FloodWait as e:
                 LOGGER.warning(f"FloodWait of {e.value} seconds encountered for StreamBot. Sleeping for {e.value + 5} seconds...")
                 await asleep(e.value + 5)
-        
+
         StreamBot.username = StreamBot.me.username
         LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
 
@@ -34,10 +33,21 @@ async def start_services():
         LOGGER.info("Initializing Multi Clients...")
         await initialize_clients()
 
-        await asleep(2)
-        LOGGER.info('Initializing Project-S Web Server...')
         await restart_notification()
+        LOGGER.info("Project-S Telegram clients started successfully!")
+    except Exception:
+        LOGGER.error("Error starting Telegram clients:\n" + format_exc())
+
+async def start_services():
+    try:
+        LOGGER.info(f"Initializing Project-Stream v-{__version__}")
+
+        # Start web server FIRST so health checks pass immediately
+        LOGGER.info('Initializing Project-S Web Server...')
         loop.create_task(server.serve())
+
+        # Start Telegram clients in background
+        loop.create_task(start_telegram())
 
         LOGGER.info("Project-S Started Successfully!")
         await idle()
@@ -53,7 +63,7 @@ async def stop_services():
                     await client.stop()
             except Exception as ce:
                 LOGGER.error(f"Error stopping client {client_id}: {ce}")
-        
+
         try:
             if StreamBot.is_connected:
                 await StreamBot.stop()
