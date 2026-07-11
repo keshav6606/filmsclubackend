@@ -10,7 +10,6 @@ from Backend.logger import LOGGER
 from Backend.config import Telegram
 from Backend.helper.encrypt import encode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, Season, TVShowSchema
-from Backend.helper.pyro import apply_channel_branding
 
 
 class Database:
@@ -184,6 +183,8 @@ class Database:
         data = {"chat_id": channel, "msg_id": msg_id, "hash": hash}
         encoded_string = await encode_string(data)
 
+        # Circular import से बचने के लिए lazy import
+        from Backend.helper.pyro import apply_channel_branding
         # फाइल नाम में से बाहरी @username हटाकर अपना @skysetx01 tag लगाएँ
         branded_name = apply_channel_branding(name)
 
