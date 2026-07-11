@@ -303,11 +303,15 @@ async def get_logs(bot: Client, message: Message):
 
 
 # Global queue for processing file updates
-
+import asyncio
 from asyncio import Lock
 
 file_queue = Queue()
 db_lock = Lock()
+
+# Debounce tasks store करने के लिए
+# Key: (tmdb_id, media_type, season_number, episode_number)
+notification_tasks = {}
 
 
 async def send_channel_notification(metadata_info):
@@ -352,10 +356,15 @@ async def send_channel_notification(metadata_info):
             for item in media_details.get('telegram', []):
                 qualities.add(item.get('quality', 'HD'))
         else:
+            # TV show case: सिर्फ इसी सीजन और एपिसोड की क्वालिटी निकालें
+            season_num = metadata_info.get('season_number')
+            episode_num = metadata_info.get('episode_number')
             for season in media_details.get('seasons', []):
-                for episode in season.get('episodes', []):
-                    for item in episode.get('telegram', []):
-                        qualities.add(item.get('quality', 'HD'))
+                if season.get('season_number') == season_num:
+                    for episode in season.get('episodes', []):
+                        if episode.get('episode_number') == episode_num:
+                            for item in episode.get('telegram', []):
+                                qualities.add(item.get('quality', 'HD'))
 
         qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
 
@@ -408,6 +417,41 @@ async def send_channel_notification(metadata_info):
         LOGGER.error(f"Failed to send channel notification: {e}")
 
 
+async def debounce_notification(metadata_info):
+    """
+    अगर एक साथ कई क्वालिटीज़ अपलोड की जा रही हैं, तो उन्हें ग्रुप करता है
+    ताकि चैनल पर केवल 1 ही समेकित नोटिफिकेशन भेजा जाए।
+    """
+    tmdb_id = int(metadata_info['tmdb_id'])
+    media_type = metadata_info['media_type']
+    season_number = metadata_info.get('season_number', None)
+    episode_number = metadata_info.get('episode_number', None)
+    
+    # Unique task key
+    task_key = (tmdb_id, media_type, season_number, episode_number)
+
+    # अगर पहले से कोई पेंडिंग नोटिफिकेशन शेड्यूल्ड है, उसे कैंसिल करें
+    if task_key in notification_tasks:
+        notification_tasks[task_key].cancel()
+
+    # नया डीलेड (delayed) टास्क बनाएं
+    async def delayed_send():
+        try:
+            # 20 सेकंड वेट करें (ताकि अन्य क्वालिटीज़ भी इंडेक्स हो जाएं)
+            await asyncio.sleep(20)
+            await send_channel_notification(metadata_info)
+        except asyncio.CancelledError:
+            # नया फाइल आने के कारण यह टास्क कैंसिल हो गया है
+            pass
+        finally:
+            # डिक्शनरी से टास्क रिमूव करें
+            if notification_tasks.get(task_key) == current_task:
+                notification_tasks.pop(task_key, None)
+
+    current_task = asyncio.create_task(delayed_send())
+    notification_tasks[task_key] = current_task
+
+
 async def process_file():
     while True:
         metadata_info, hash, channel, msg_id, size, title = await file_queue.get()
@@ -415,8 +459,8 @@ async def process_file():
             updated_id = await db.insert_media(metadata_info, hash=hash, channel=channel, msg_id=msg_id, size=size, name=title)
             if updated_id:
                 LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
-                # Auto Notification भेजें
-                await send_channel_notification(metadata_info)
+                # Grouped/Debounced notification भेजें
+                await debounce_notification(metadata_info)
             else:
                 LOGGER.info("Update failed due to validation errors.")
         file_queue.task_done()
