@@ -604,4 +604,128 @@ async def delete(bot: Client, message: Message):
     
     except Exception as e:
         await message.reply_text(f"An error occurred: {str(e)}")
+
+
+@StreamBot.on_message(filters.private & filters.text & ~filters.command(["start", "help", "user", "restart", "log", "caption", "tmdb", "set", "delete"]))
+async def bot_search_handler(bot: Client, message: Message):
+    """
+    यूज़र बोट चैट में कुछ भी टेक्स्ट (मूवी का नाम) लिखकर सेंड करेगा,
+    तो बोट उसे डेटाबेस से फ़ेच करके पोस्टर इमेज, उपलब्ध क्वालिटीज़ और Vercel लिंक के साथ रिप्लाई देगा।
+    """
+    query = message.text.strip()
+    if not query:
+        return
+
+    # 1. Force Join Check
+    if Telegram.FORCE_JOIN_CHANNEL:
+        joined = await is_user_joined(bot, message.from_user.id)
+        if not joined:
+            channel = Telegram.FORCE_JOIN_CHANNEL
+            try:
+                chat = await bot.get_chat(channel)
+                invite = f"https://t.me/{chat.username}" if chat.username else await bot.export_chat_invite_link(channel)
+                ch_name = chat.title or "Our Channel"
+            except Exception:
+                invite = f"https://t.me/{Telegram.CHANNEL_USERNAME}"
+                ch_name = "Our Channel"
+
+            return await message.reply_text(
+                f"⚠️ **Channel Join Required!**\n\n"
+                f"📌 Humari movies & series search karne aur direct link paane ke liye pehle hamara channel join karo:\n"
+                f"👉 **{ch_name}**\n\n"
+                f"Channel join karne ke baad phir se search karein.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        f"✅ Join {ch_name}",
+                        url=invite
+                    )
+                ]])
+            )
+
+    # 2. Search in Database
+    searching_msg = await message.reply_text("🔍 Searching for your request, please wait...")
+    try:
+        search_results = await db.search_documents(query, page=1, page_size=5)
+        results = search_results.get("results", [])
+        
+        if not results:
+            return await searching_msg.edit_text(
+                f"❌ No results found for **'{query}'**.\n\n"
+                f"Please check the spelling or try another keyword."
+            )
+        
+        await searching_msg.delete()
+        
+        for doc in results:
+            tmdb_id = doc.get("tmdb_id")
+            title = doc.get("title", "Unknown Title")
+            media_type = doc.get("media_type", "movie")
+            
+            # Fetch full details
+            media_details = await db.get_media_details(tmdb_id)
+            if not media_details:
+                continue
+                
+            year = media_details.get('release_year', 0)
+            rating = media_details.get('rating', 0.0)
+            genres_list = media_details.get('genres', [])
+            genres = ", ".join(genres_list) if genres_list else "N/A"
+            languages_list = media_details.get('languages', [])
+            languages = ", ".join(languages_list) if languages_list else "Hindi"
+            rip = media_details.get('rip', 'Blu-ray')
+            
+            description = media_details.get('description', '')
+            if len(description) > 300:
+                description = description[:297] + "..."
+
+            # Qualities check
+            qualities = set()
+            if media_type == "movie":
+                for item in media_details.get('telegram', []):
+                    qualities.add(item.get('quality', 'HD'))
+            else:
+                for season in media_details.get('seasons', []):
+                    for episode in season.get('episodes', []):
+                        for item in episode.get('telegram', []):
+                            qualities.add(item.get('quality', 'HD'))
+            qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
+
+            # Vercel Link construction
+            path_type = "mov" if media_type == "movie" else "ser"
+            website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
+
+            caption = (
+                f"🎬 **Search Result!** 🎬\n\n"
+                f"🎥 **Title:** {title} ({year})\n"
+                f"⭐️ **Rating:** {rating}/10\n"
+                f"🎭 **Genres:** {genres}\n"
+                f"🔊 **Languages:** {languages}\n"
+                f"💿 **Quality:** {qualities_str} [{rip}]\n\n"
+                f"📝 **Plot:** {description}\n\n"
+                f"🔗 **Watch/Download Online:**\n"
+                f"👉 {website_link}"
+            )
+
+            image_url = media_details.get('backdrop') or media_details.get('poster')
+
+            reply_markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🌐 Watch/Download Now", url=website_link)
+            ]])
+
+            if image_url:
+                await message.reply_photo(
+                    photo=image_url,
+                    caption=caption,
+                    reply_markup=reply_markup
+                )
+            else:
+                await message.reply_text(
+                    text=caption,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=False
+                )
+            await asleep(0.5) # Avoid floodwait
+    except Exception as e:
+        LOGGER.error(f"Error in bot search handler: {e}")
+        await message.reply_text("❌ An error occurred while searching. Please try again later.")
         
