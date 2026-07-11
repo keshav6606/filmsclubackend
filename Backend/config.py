@@ -25,5 +25,12 @@ class Telegram:
     # Auto-branding: जो @username filename में prefix होगा (@ मत लगाएँ)
     CHANNEL_USERNAME = getenv("CHANNEL_USERNAME", "skysetx01")
     # Force Join: फाइल देने से पहले यूज़र को इस channel में join करना पड़ेगा
-    # उदाहरण: "-1001234567890" या कुछ नहीं चाहिए तो None रखें
-    FORCE_JOIN_CHANNEL = getenv("FORCE_JOIN_CHANNEL", None)
+    # default channel ID: -1002342440306 (अगर बंद करना हो तो env में empty या None सेट करें)
+    FORCE_JOIN_CHANNEL = getenv("FORCE_JOIN_CHANNEL", "-1002342440306")
+    if FORCE_JOIN_CHANNEL and FORCE_JOIN_CHANNEL.strip():
+        try:
+            FORCE_JOIN_CHANNEL = int(FORCE_JOIN_CHANNEL)
+        except ValueError:
+            pass
+    else:
+        FORCE_JOIN_CHANNEL = None
