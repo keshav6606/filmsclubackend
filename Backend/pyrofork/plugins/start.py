@@ -6,7 +6,7 @@ from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
 from Backend.helper.encrypt import decode_string
 from Backend.helper.metadata import metadata
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.pyro import apply_channel_branding, get_readable_file_size, remove_urls
 from Backend.pyrofork import StreamBot
 from pyrogram import filters, Client
 from pyrogram.types import Message
@@ -199,8 +199,8 @@ async def start(bot: Client, message: Message):
             create_task(delete_messages_after_delay(sent_messages))
     else:
         await message.reply_text(
-            "Welcome to @Filmy4uhdbot! 🎬\n\n"
-            "I am here to provide direct download links for movies & series from filmy4uhd.site .\n"
+            f"Welcome to @skysetx01! 🎬\n\n"
+            "I am here to provide direct download links for movies & series.\n"
             "📥 Just send a file link to get started!"
         )
 
@@ -291,10 +291,13 @@ async def file_receive_handler(bot: Client, message: Message):
                 size = get_readable_file_size(file.file_size)
                 channel = str(message.chat.id).replace("-100", "")
                 
-                metadata_info = await metadata(clean_filename(title), file)
+                # metadata() ke andar ab clean_movie_title() apply hoti hai
+                metadata_info = await metadata(title, file)
                 if metadata_info is None:
                     return await message.reply_text("> Not added check log")
-                title = remove_urls(title)
+
+                # सभी बाहरी @username हटाकर @skysetx01 brand लगाओ (DB में यही जाएगा)
+                title = apply_channel_branding(title)
                 if not title.endswith(('.mkv', '.mp4')):
                     title += '.mkv'
                 await file_queue.put((metadata_info, hash, int(channel), msg_id, size, title))
