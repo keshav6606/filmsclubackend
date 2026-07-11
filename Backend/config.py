@@ -22,3 +22,5 @@ class Telegram:
     USE_TMDB = getenv("USE_TMDB", "True").lower() == "true"
     OWNER_ID = int(getenv("OWNER_ID", "7045947967"))
     USE_DEFAULT_ID = getenv("USE_DEFAULT_ID", None)
+    # Auto-branding: जो @username filename में prefix होगा (@ मत लगाएँ)
+    CHANNEL_USERNAME = getenv("CHANNEL_USERNAME", "skysetx01")

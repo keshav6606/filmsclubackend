@@ -93,6 +93,28 @@ def clean_movie_title(raw_title: str) -> str:
 clean_filename = clean_movie_title
 
 
+def apply_channel_branding(filename: str) -> str:
+    """
+    Filename में से सभी बाहरी @username हटाता है और अपने channel का @tag prefix में जोड़ता है।
+    उदाहरण:
+      Input:  "@Latest_Movies_Reborn - Dhamaal.4.2026.1080p.mkv"
+      Output: "@Filmy4uhdbot - Dhamaal.4.2026.1080p.mkv"
+
+    अगर CHANNEL_USERNAME set नहीं है तो सिर्फ @username हटाकर clean नाम देता है।
+    """
+    channel = (Telegram.CHANNEL_USERNAME or '').strip().lstrip('@')
+
+    # सभी बाहरी @username हटाएँ (leading/trailing dashes भी)
+    branded = re.sub(r'@[A-Za-z0-9_]+', '', filename)
+    branded = re.sub(r'^[\s\-|]+|[\s\-|]+$', '', branded).strip()
+
+    # अपना @tag prefix में जोड़ें (अगर channel set है)
+    if channel:
+        branded = f"@{channel} - {branded}"
+
+    return branded
+
+
 
 def get_readable_time(seconds: int) -> str:
     count = 0
