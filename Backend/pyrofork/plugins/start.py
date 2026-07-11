@@ -619,9 +619,11 @@ async def bot_search_handler(bot: Client, message: Message):
       1. /search <मूवी नाम> या /find <मूवी नाम> कमांड पर काम करेगा।
       2. बोट को मेंशन करने पर (जैसे: movies request @botusername movie_name)
       3. बोट के किसी भी मैसेज का रिप्लाई देने पर।
+      4. ग्रुप चैट में कोई भी नॉर्मल टेक्स्ट भेजने पर (यह केवल तभी रिप्लाई करेगा जब डेटाबेस में फ़ाइल मौजूद हो, अन्यथा शांत रहेगा)।
     """
     import re
     is_group = message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]
+    is_command = False
     
     if is_group:
         is_triggered = False
@@ -630,16 +632,22 @@ async def bot_search_handler(bot: Client, message: Message):
         # 1. Check command first
         if message.command:
             is_triggered = True
+            is_command = True
             query = " ".join(message.command[1:]).strip()
         # 2. Check bot username mention
         elif message.text and f"@{bot.me.username}" in message.text:
             is_triggered = True
-            # Mentions and request keywords like "movies", "please" are cleaned
+            is_command = True
             raw_text = message.text.replace(f"@{bot.me.username}", "").strip()
             cleaned = re.sub(r'(?i)\b(movies?|show|series|request|find|search|please|give|send|get)\b', '', raw_text)
             query = cleaned.strip()
         # 3. Check reply to bot's messages
         elif message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot.me.id:
+            is_triggered = True
+            is_command = True
+            query = message.text.strip()
+        # 4. Check normal group text
+        elif message.text:
             is_triggered = True
             query = message.text.strip()
             
@@ -655,6 +663,10 @@ async def bot_search_handler(bot: Client, message: Message):
     if Telegram.FORCE_JOIN_CHANNEL:
         joined = await is_user_joined(bot, message.from_user.id)
         if not joined:
+            # केवल कमांड या प्राइवेट चैट में जॉइन एरर शो करें, ग्रुप चैट में सामान्य टेक्स्ट पर शांत रहें
+            if is_group and not is_command:
+                return
+                
             channel = Telegram.FORCE_JOIN_CHANNEL
             try:
                 chat = await bot.get_chat(channel)
@@ -678,13 +690,21 @@ async def bot_search_handler(bot: Client, message: Message):
             )
 
     # 2. Search in Database
-    searching_msg = await message.reply_text("🔍 Searching for your request, please wait...")
+    # ग्रुप में सामान्य टेक्स्ट पर "Searching..." मैसेज न भेजें ताकि चैटरूम स्पैम न हो
+    show_searching = not (is_group and not is_command)
+    searching_msg = None
+    if show_searching:
+        searching_msg = await message.reply_text("🔍 Searching for your request, please wait...")
+        
     try:
         search_results = await db.search_documents(query, page=1, page_size=5)
         results = search_results.get("results", [])
         
         # --- LOCAL DATABASE RESULTS FOUND ---
         if results:
+            if searching_msg:
+                await searching_msg.delete()
+                
             text = f"🎬 **Search Results for '{query}'** 🎬\n\n"
             buttons = []
             image_url = None
@@ -750,11 +770,14 @@ async def bot_search_handler(bot: Client, message: Message):
                     reply_markup=InlineKeyboardMarkup(buttons),
                     disable_web_page_preview=True
                 )
-            
-            await searching_msg.delete()
             return
 
-        # --- NO LOCAL RESULTS: FALLBACK TO TMDB SEARCH ---
+        # --- NO LOCAL RESULTS ---
+        # ग्रुप चैट में सामान्य बातचीत/टेक्स्ट पर बिना मैच के बोट शांत रहेगा
+        if is_group and not is_command:
+            return
+
+        # --- FALLBACK TO TMDB SEARCH --- (सिर्फ कमांड या इनबॉक्स के लिए)
         LOGGER.info(f"No local results for '{query}'. Searching TMDb...")
         
         tmdb_movies = await tmdb.search().movies(query=query)
@@ -769,10 +792,15 @@ async def bot_search_handler(bot: Client, message: Message):
                 combined_tmdb.append((item, "tv"))
                 
         if not combined_tmdb:
-            return await searching_msg.edit_text(
-                f"❌ No results found for **'{query}'** in our database or on TMDb.\n\n"
-                f"Please check the spelling and try again."
-            )
+            if searching_msg:
+                return await searching_msg.edit_text(
+                    f"❌ No results found for **'{query}'** in our database or on TMDb.\n\n"
+                    f"Please check the spelling and try again."
+                )
+            return
+            
+        if searching_msg:
+            await searching_msg.delete()
             
         text = f"🎬 **TMDb Search Results (Not Uploaded Yet)** 🎬\n"
         text += f"⚠️ *Note: These are not in our database yet, but you can visit their pages or request the admin below to upload them.*\n\n"
@@ -835,8 +863,6 @@ async def bot_search_handler(bot: Client, message: Message):
                 reply_markup=InlineKeyboardMarkup(buttons),
                 disable_web_page_preview=True
             )
-            
-        await searching_msg.delete()
         return
                 
     except Exception as e:
