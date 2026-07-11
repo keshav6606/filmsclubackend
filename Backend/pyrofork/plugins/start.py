@@ -608,21 +608,45 @@ async def delete(bot: Client, message: Message):
 
 @StreamBot.on_message(
     (filters.private & filters.text & ~filters.command(["start", "help", "user", "restart", "log", "caption", "tmdb", "set", "delete", "search", "find"])) |
-    (filters.command(["search", "find"]) & (filters.group | filters.private))
+    (filters.command(["search", "find"]) & (filters.group | filters.private)) |
+    (filters.text & filters.group)
 )
 async def bot_search_handler(bot: Client, message: Message):
     """
     सर्च हैंडलर:
     - प्राइवेट चैट में: कोई भी टेक्स्ट (मूवी का नाम) भेजने पर सीधे काम करेगा।
-    - ग्रुप चैट में: /search <मूवी नाम> या /find <मूवी नाम> कमांड पर काम करेगा।
+    - ग्रुप चैट में:
+      1. /search <मूवी नाम> या /find <मूवी नाम> कमांड पर काम करेगा।
+      2. बोट को मेंशन करने पर (जैसे: movies request @botusername movie_name)
+      3. बोट के किसी भी मैसेज का रिप्लाई देने पर।
     """
-    if message.command:
-        # यदि यह /search या /find जैसी कमांड है
-        query = " ".join(message.command[1:]).strip()
-        if not query:
-            return await message.reply_text("❌ Usage: `/search <movie name>` or `/find <movie name>`")
+    import re
+    is_group = message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]
+    
+    if is_group:
+        is_triggered = False
+        query = ""
+        
+        # 1. Check command first
+        if message.command:
+            is_triggered = True
+            query = " ".join(message.command[1:]).strip()
+        # 2. Check bot username mention
+        elif message.text and f"@{bot.me.username}" in message.text:
+            is_triggered = True
+            # Mentions and request keywords like "movies", "please" are cleaned
+            raw_text = message.text.replace(f"@{bot.me.username}", "").strip()
+            cleaned = re.sub(r'(?i)\b(movies?|show|series|request|find|search|please|give|send|get)\b', '', raw_text)
+            query = cleaned.strip()
+        # 3. Check reply to bot's messages
+        elif message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot.me.id:
+            is_triggered = True
+            query = message.text.strip()
+            
+        if not is_triggered or not query:
+            return
     else:
-        # यदि यह प्राइवेट इनबॉक्स में डायरेक्ट सेंड किया गया टेक्स्ट है
+        # Private chat direct text
         query = message.text.strip()
         if not query:
             return
@@ -644,7 +668,7 @@ async def bot_search_handler(bot: Client, message: Message):
                 f"⚠️ **Channel Join Required!**\n\n"
                 f"📌 Humari movies & series search karne aur direct link paane ke liye pehle hamara channel join karo:\n"
                 f"👉 **{ch_name}**\n\n"
-                f"Channel join karne ke baad phir se search karein.",
+                f"Channel join karne ke baad/Start join request accept hone ke baad search karein.",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(
                         f"✅ Join {ch_name}",
@@ -663,6 +687,7 @@ async def bot_search_handler(bot: Client, message: Message):
         if results:
             text = f"🎬 **Search Results for '{query}'** 🎬\n\n"
             buttons = []
+            image_url = None
             
             for index, doc in enumerate(results, 1):
                 tmdb_id = doc.get("tmdb_id")
@@ -680,6 +705,10 @@ async def bot_search_handler(bot: Client, message: Message):
                 rip = "Blu-ray"
                 if media_details:
                     rip = media_details.get('rip', 'Blu-ray')
+                    # Get first matching result poster/backdrop image
+                    if index == 1:
+                        image_url = media_details.get('backdrop') or media_details.get('poster')
+                    
                     if media_type == "movie":
                         for item in media_details.get('telegram', []):
                             qualities.add(item.get('quality', 'HD'))
@@ -702,12 +731,28 @@ async def bot_search_handler(bot: Client, message: Message):
                 
                 buttons.append([InlineKeyboardButton(f"🌐 {index}. {title} ({year})", url=website_link)])
                 
+            # Send photo with caption if image is available, else send text
+            sent = False
+            if image_url:
+                try:
+                    await message.reply_photo(
+                        photo=image_url,
+                        caption=text.strip(),
+                        reply_markup=InlineKeyboardMarkup(buttons)
+                    )
+                    sent = True
+                except Exception as ex:
+                    LOGGER.warning(f"Failed to reply with photo for search: {ex}")
+            
+            if not sent:
+                await message.reply_text(
+                    text=text.strip(),
+                    reply_markup=InlineKeyboardMarkup(buttons),
+                    disable_web_page_preview=True
+                )
+            
             await searching_msg.delete()
-            return await message.reply_text(
-                text=text.strip(),
-                reply_markup=InlineKeyboardMarkup(buttons),
-                disable_web_page_preview=True
-            )
+            return
 
         # --- NO LOCAL RESULTS: FALLBACK TO TMDB SEARCH ---
         LOGGER.info(f"No local results for '{query}'. Searching TMDb...")
@@ -732,6 +777,7 @@ async def bot_search_handler(bot: Client, message: Message):
         text = f"🎬 **TMDb Search Results (Not Uploaded Yet)** 🎬\n"
         text += f"⚠️ *Note: These are not in our database yet, but you can visit their pages or request the admin below to upload them.*\n\n"
         buttons = []
+        image_url = None
         
         for index, (item, media_type) in enumerate(combined_tmdb[:5], 1):
             tmdb_id = item.id
@@ -743,6 +789,18 @@ async def bot_search_handler(bot: Client, message: Message):
                 title = item.name
                 year = item.first_air_date.year if item.first_air_date else 0
                 rating = item.vote_average or 0.0
+                
+            # Get the first result's image from TMDb
+            if index == 1:
+                try:
+                    if media_type == "movie":
+                        first_details = await tmdb.movie(tmdb_id).details()
+                    else:
+                        first_details = await tmdb.tv(tmdb_id).details()
+                    image_url = f"https://image.tmdb.org/t/p/w500{first_details.poster_path}" if first_details.poster_path else \
+                                (f"https://image.tmdb.org/t/p/original{first_details.backdrop_path}" if first_details.backdrop_path else None)
+                except Exception:
+                    pass
                 
             path_type = "mov" if media_type == "movie" else "ser"
             website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
@@ -758,12 +816,28 @@ async def bot_search_handler(bot: Client, message: Message):
                 InlineKeyboardButton(f"🙋‍♂️ Request Upload {index}", callback_data=f"req_{media_type}_{tmdb_id}")
             ])
             
+        # Send TMDb consolidated result
+        sent = False
+        if image_url:
+            try:
+                await message.reply_photo(
+                    photo=image_url,
+                    caption=text.strip(),
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
+                sent = True
+            except Exception as ex:
+                LOGGER.warning(f"Failed to reply with TMDb fallback photo: {ex}")
+                
+        if not sent:
+            await message.reply_text(
+                text=text.strip(),
+                reply_markup=InlineKeyboardMarkup(buttons),
+                disable_web_page_preview=True
+            )
+            
         await searching_msg.delete()
-        return await message.reply_text(
-            text=text.strip(),
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=True
-        )
+        return
                 
     except Exception as e:
         LOGGER.error(f"Error in bot search handler: {e}")
