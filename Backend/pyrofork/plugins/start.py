@@ -309,6 +309,105 @@ from asyncio import Lock
 file_queue = Queue()
 db_lock = Lock()
 
+
+async def send_channel_notification(metadata_info):
+    """
+    FORCE_JOIN_CHANNEL पर नई फ़ाइल अपलोड का सुंदर नोटिफिकेशन भेजता है।
+    इसमें TMDb/IMDb डिटेल्स, इमेज, उपलब्ध क्वालिटीज़ और वेबसाइट का सही पाथ-लिंक शामिल होता है।
+    """
+    channel = Telegram.FORCE_JOIN_CHANNEL
+    if not channel:
+        LOGGER.info("No FORCE_JOIN_CHANNEL set, skipping notification.")
+        return
+
+    try:
+        tmdb_id = int(metadata_info['tmdb_id'])
+        media_type = metadata_info['media_type']
+
+        # Database से अपडेटेड डिटेल्स फ़ेच करें
+        media_details = await db.get_media_details(tmdb_id)
+        if not media_details:
+            LOGGER.warning(f"Could not fetch details for tmdb_id {tmdb_id} from database.")
+            return
+
+        title = media_details.get('title', 'Unknown Title')
+        year = media_details.get('release_year', 0)
+        rating = media_details.get('rating', 0.0)
+        
+        genres_list = media_details.get('genres', [])
+        genres = ", ".join(genres_list) if genres_list else "N/A"
+        
+        languages_list = media_details.get('languages', [])
+        languages = ", ".join(languages_list) if languages_list else "Hindi"
+        
+        rip = media_details.get('rip', 'Blu-ray')
+        
+        description = media_details.get('description', '')
+        if len(description) > 300:
+            description = description[:297] + "..."
+
+        # सभी उपलब्ध क्वालिटीज़ (Qualities) निकालें
+        qualities = set()
+        if media_type == "movie":
+            for item in media_details.get('telegram', []):
+                qualities.add(item.get('quality', 'HD'))
+        else:
+            for season in media_details.get('seasons', []):
+                for episode in season.get('episodes', []):
+                    for item in episode.get('telegram', []):
+                        qualities.add(item.get('quality', 'HD'))
+
+        qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
+
+        # मीडिया टाइप के अनुसार टाइटल तैयार करें
+        if media_type == "tv" and 'season_number' in metadata_info and 'episode_number' in metadata_info:
+            ep_title = metadata_info.get('episode_title', f"Episode {metadata_info['episode_number']}")
+            title_str = f"🎥 **Title:** {title} - S{metadata_info['season_number']}E{metadata_info['episode_number']} ({ep_title}) [{year}]"
+        else:
+            title_str = f"🎥 **Title:** {title} ({year})"
+
+        # Vercel फ़्रंटएंड के अनुसार पाथ-लिंक बनाएं
+        path_type = "mov" if media_type == "movie" else "ser"
+        website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
+
+        # सुंदर कैप्शन/पोस्ट
+        caption = (
+            f"🎬 **New Upload Alert!** 🎬\n\n"
+            f"{title_str}\n"
+            f"⭐️ **Rating:** {rating}/10\n"
+            f"🎭 **Genres:** {genres}\n"
+            f"🔊 **Languages:** {languages}\n"
+            f"💿 **Quality:** {qualities_str} [{rip}]\n\n"
+            f"📝 **Plot:** {description}\n\n"
+            f"🔗 **Watch/Download Online:**\n"
+            f"👉 {website_link}"
+        )
+
+        image_url = media_details.get('backdrop') or media_details.get('poster')
+
+        reply_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🌐 Watch/Download Now", url=website_link)
+        ]])
+
+        if image_url:
+            await StreamBot.send_photo(
+                chat_id=int(channel),
+                photo=image_url,
+                caption=caption,
+                reply_markup=reply_markup
+            )
+        else:
+            await StreamBot.send_message(
+                chat_id=int(channel),
+                text=caption,
+                reply_markup=reply_markup,
+                disable_web_page_preview=False
+            )
+        LOGGER.info(f"Notification sent successfully to {channel} for {title}")
+    except Exception as e:
+        LOGGER.error(f"Failed to send channel notification: {e}")
+
+
 async def process_file():
     while True:
         metadata_info, hash, channel, msg_id, size, title = await file_queue.get()
@@ -316,6 +415,8 @@ async def process_file():
             updated_id = await db.insert_media(metadata_info, hash=hash, channel=channel, msg_id=msg_id, size=size, name=title)
             if updated_id:
                 LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
+                # Auto Notification भेजें
+                await send_channel_notification(metadata_info)
             else:
                 LOGGER.info("Update failed due to validation errors.")
         file_queue.task_done()
