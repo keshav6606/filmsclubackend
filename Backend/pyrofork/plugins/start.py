@@ -650,77 +650,53 @@ async def bot_search_handler(bot: Client, message: Message):
         
         # --- LOCAL DATABASE RESULTS FOUND ---
         if results:
-            await searching_msg.delete()
-            for doc in results:
+            text = f"🎬 **Search Results for '{query}'** 🎬\n\n"
+            buttons = []
+            
+            for index, doc in enumerate(results, 1):
                 tmdb_id = doc.get("tmdb_id")
                 title = doc.get("title", "Unknown Title")
                 media_type = doc.get("media_type", "movie")
                 
                 # Fetch full details
                 media_details = await db.get_media_details(tmdb_id)
-                if not media_details:
-                    continue
-                    
-                year = media_details.get('release_year', 0)
-                rating = media_details.get('rating', 0.0)
-                genres_list = media_details.get('genres', [])
+                year = media_details.get('release_year', 0) if media_details else doc.get('release_year', 0)
+                rating = media_details.get('rating', 0.0) if media_details else doc.get('rating', 0.0)
+                genres_list = media_details.get('genres', []) if media_details else doc.get('genres', [])
                 genres = ", ".join(genres_list) if genres_list else "N/A"
-                languages_list = media_details.get('languages', [])
-                languages = ", ".join(languages_list) if languages_list else "Hindi"
-                rip = media_details.get('rip', 'Blu-ray')
                 
-                description = media_details.get('description', '')
-                if len(description) > 300:
-                    description = description[:297] + "..."
-
-                # Qualities check
                 qualities = set()
-                if media_type == "movie":
-                    for item in media_details.get('telegram', []):
-                        qualities.add(item.get('quality', 'HD'))
-                else:
-                    for season in media_details.get('seasons', []):
-                        for episode in season.get('episodes', []):
-                            for item in episode.get('telegram', []):
-                                qualities.add(item.get('quality', 'HD'))
+                rip = "Blu-ray"
+                if media_details:
+                    rip = media_details.get('rip', 'Blu-ray')
+                    if media_type == "movie":
+                        for item in media_details.get('telegram', []):
+                            qualities.add(item.get('quality', 'HD'))
+                    else:
+                        for season in media_details.get('seasons', []):
+                            for episode in season.get('episodes', []):
+                                for item in episode.get('telegram', []):
+                                    qualities.add(item.get('quality', 'HD'))
+                
                 qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
-
-                # Vercel Link construction
                 path_type = "mov" if media_type == "movie" else "ser"
                 website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
-
-                caption = (
-                    f"🎬 **Search Result!** 🎬\n\n"
-                    f"🎥 **Title:** {title} ({year})\n"
-                    f"⭐️ **Rating:** {rating}/10\n"
-                    f"🎭 **Genres:** {genres}\n"
-                    f"🔊 **Languages:** {languages}\n"
-                    f"💿 **Quality:** {qualities_str} [{rip}]\n\n"
-                    f"📝 **Plot:** {description}\n\n"
-                    f"🔗 **Watch/Download Online:**\n"
-                    f"👉 {website_link}"
+                
+                text += (
+                    f"🍿 **{index}. {title} ({year})**\n"
+                    f"⭐️ **Rating:** {rating}/10 | 🎭 **Genres:** {genres}\n"
+                    f"💿 **Quality:** {qualities_str} [{rip}]\n"
+                    f"🔗 [Watch/Download Page]({website_link})\n\n"
                 )
-
-                image_url = media_details.get('backdrop') or media_details.get('poster')
-
-                reply_markup = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🌐 Watch/Download Now", url=website_link)
-                ]])
-
-                if image_url:
-                    await message.reply_photo(
-                        photo=image_url,
-                        caption=caption,
-                        reply_markup=reply_markup
-                    )
-                else:
-                    await message.reply_text(
-                        text=caption,
-                        reply_markup=reply_markup,
-                        disable_web_page_preview=False
-                    )
-                await asleep(0.5) # Avoid floodwait
-            return
+                
+                buttons.append([InlineKeyboardButton(f"🌐 {index}. {title} ({year})", url=website_link)])
+                
+            await searching_msg.delete()
+            return await message.reply_text(
+                text=text.strip(),
+                reply_markup=InlineKeyboardMarkup(buttons),
+                disable_web_page_preview=True
+            )
 
         # --- NO LOCAL RESULTS: FALLBACK TO TMDB SEARCH ---
         LOGGER.info(f"No local results for '{query}'. Searching TMDb...")
@@ -742,69 +718,38 @@ async def bot_search_handler(bot: Client, message: Message):
                 f"Please check the spelling and try again."
             )
             
-        await searching_msg.delete()
+        text = f"🎬 **TMDb Search Results (Not Uploaded Yet)** 🎬\n"
+        text += f"⚠️ *Note: These are not in our database yet, but you can visit their pages to request them.*\n\n"
+        buttons = []
         
-        # Display top 3 results from TMDb fallback
-        for item, media_type in combined_tmdb[:3]:
-            try:
-                tmdb_id = item.id
-                if media_type == "movie":
-                    details = await tmdb.movie(tmdb_id).details()
-                    title = details.title
-                    year = details.release_date.year if details.release_date else 0
-                    rating = details.vote_average or 0.0
-                    genres_list = [genre.name for genre in details.genres] if details.genres else []
-                    description = details.overview or ""
-                    image_url = f"https://image.tmdb.org/t/p/w500{details.poster_path}" if details.poster_path else \
-                                (f"https://image.tmdb.org/t/p/original{details.backdrop_path}" if details.backdrop_path else None)
-                else:
-                    details = await tmdb.tv(tmdb_id).details()
-                    title = details.name
-                    year = details.first_air_date.year if details.first_air_date else 0
-                    rating = details.vote_average or 0.0
-                    genres_list = [genre.name for genre in details.genres] if details.genres else []
-                    description = details.overview or ""
-                    image_url = f"https://image.tmdb.org/t/p/w500{details.poster_path}" if details.poster_path else \
-                                (f"https://image.tmdb.org/t/p/original{details.backdrop_path}" if details.backdrop_path else None)
+        for index, (item, media_type) in enumerate(combined_tmdb[:5], 1):
+            tmdb_id = item.id
+            if media_type == "movie":
+                title = item.title
+                year = item.release_date.year if item.release_date else 0
+                rating = item.vote_average or 0.0
+            else:
+                title = item.name
+                year = item.first_air_date.year if item.first_air_date else 0
+                rating = item.vote_average or 0.0
                 
-                genres = ", ".join(genres_list) if genres_list else "N/A"
-                if len(description) > 300:
-                    description = description[:297] + "..."
-                    
-                path_type = "mov" if media_type == "movie" else "ser"
-                website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
-                
-                caption = (
-                    f"🎬 **TMDb Result (Not Uploaded Yet)** 🎬\n\n"
-                    f"🎥 **Title:** {title} ({year})\n"
-                    f"⭐️ **Rating:** {rating:.1f}/10\n"
-                    f"🎭 **Genres:** {genres}\n"
-                    f"💿 **Quality:** N/A (Requested)\n\n"
-                    f"📝 **Plot:** {description}\n\n"
-                    f"🔗 **Watch/Download on Website:**\n"
-                    f"👉 {website_link}\n\n"
-                    f"⚠️ *Note: This movie is not yet indexed in our database, but you can request it on the website.*"
-                )
-                
-                reply_markup = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🌐 Go to Movie Page", url=website_link)
-                ]])
-                
-                if image_url:
-                    await message.reply_photo(
-                        photo=image_url,
-                        caption=caption,
-                        reply_markup=reply_markup
-                    )
-                else:
-                    await message.reply_text(
-                        text=caption,
-                        reply_markup=reply_markup,
-                        disable_web_page_preview=False
-                    )
-                await asleep(0.5)
-            except Exception as ex:
-                LOGGER.error(f"Failed to fetch TMDb details for fallback: {ex}")
+            path_type = "mov" if media_type == "movie" else "ser"
+            website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
+            
+            text += (
+                f"🎥 **{index}. {title} ({year})**\n"
+                f"⭐️ **Rating:** {rating:.1f}/10\n"
+                f"🔗 [Request Page]({website_link})\n\n"
+            )
+            
+            buttons.append([InlineKeyboardButton(f"🌐 Request: {title} ({year})", url=website_link)])
+            
+        await searching_msg.delete()
+        return await message.reply_text(
+            text=text.strip(),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True
+        )
                 
     except Exception as e:
         LOGGER.error(f"Error in bot search handler: {e}")
