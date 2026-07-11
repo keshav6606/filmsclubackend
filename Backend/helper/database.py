@@ -494,3 +494,32 @@ class Database:
             return True
         LOGGER.info(f"No document found with tmdb_id {tmdb_id}.")
         return False
+
+    async def update_channel_message_id(
+        self,
+        tmdb_id: int,
+        media_type: str,
+        message_id: int,
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None
+    ) -> bool:
+        try:
+            if media_type == "movie":
+                await self.movie_collection.update_one(
+                    {"tmdb_id": tmdb_id},
+                    {"$set": {"channel_message_id": message_id}}
+                )
+            else:
+                await self.tv_collection.update_one(
+                    {
+                        "tmdb_id": tmdb_id,
+                        "seasons.season_number": season_number,
+                        "seasons.episodes.episode_number": episode_number
+                    },
+                    {"$set": {"seasons.$[s].episodes.$[e].channel_message_id": message_id}},
+                    array_filters=[{"s.season_number": season_number}, {"e.episode_number": episode_number}]
+                )
+            return True
+        except Exception as e:
+            LOGGER.error(f"Failed to update channel message ID in database: {e}")
+            return False

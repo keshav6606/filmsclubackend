@@ -13,6 +13,7 @@ class Episode(BaseModel):
     title: str = Field(..., description="Title of the episode")
     episode_backdrop: str = Field(..., description="Backdrop of Episode")
     telegram: Optional[List[QualityDetail]] = Field(None, description="List of available quality details")
+    channel_message_id: Optional[int] = Field(None, description="Telegram message ID of the channel post")
 
 class Season(BaseModel):
     season_number: int = Field(..., description="Season number within the TV show")
@@ -53,3 +54,4 @@ class MovieSchema(BaseModel):
     languages: List[str] = Field(..., description="List of languages associated with the Movie")
     rip: str = Field(..., description="Media rip of the file")
     telegram: Optional[List[QualityDetail]] = Field(None, description="List of available quality details")
+    channel_message_id: Optional[int] = Field(None, description="Telegram message ID of the channel post")

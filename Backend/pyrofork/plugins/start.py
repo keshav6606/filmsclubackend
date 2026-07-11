@@ -318,6 +318,7 @@ async def send_channel_notification(metadata_info):
     """
     FORCE_JOIN_CHANNEL पर नई फ़ाइल अपलोड का सुंदर नोटिफिकेशन भेजता है।
     इसमें TMDb/IMDb डिटेल्स, इमेज, उपलब्ध क्वालिटीज़ और वेबसाइट का सही पाथ-लिंक शामिल होता है।
+    यदि पहले से ही पोस्ट मौजूद है तो उसे एडिट करता है।
     """
     channel = Telegram.FORCE_JOIN_CHANNEL
     if not channel:
@@ -352,17 +353,21 @@ async def send_channel_notification(metadata_info):
 
         # सभी उपलब्ध क्वालिटीज़ (Qualities) निकालें
         qualities = set()
+        existing_msg_id = None
+
         if media_type == "movie":
+            existing_msg_id = media_details.get('channel_message_id')
             for item in media_details.get('telegram', []):
                 qualities.add(item.get('quality', 'HD'))
         else:
-            # TV show case: सिर्फ इसी सीजन और एपिसोड की क्वालिटी निकालें
+            # TV show case: सिर्फ इसी सीजन और एपिसोड की क्वालिटी और message ID निकालें
             season_num = metadata_info.get('season_number')
             episode_num = metadata_info.get('episode_number')
             for season in media_details.get('seasons', []):
                 if season.get('season_number') == season_num:
                     for episode in season.get('episodes', []):
                         if episode.get('episode_number') == episode_num:
+                            existing_msg_id = episode.get('channel_message_id')
                             for item in episode.get('telegram', []):
                                 qualities.add(item.get('quality', 'HD'))
 
@@ -398,21 +403,53 @@ async def send_channel_notification(metadata_info):
             InlineKeyboardButton("🌐 Watch/Download Now", url=website_link)
         ]])
 
-        if image_url:
-            await StreamBot.send_photo(
-                chat_id=int(channel),
-                photo=image_url,
-                caption=caption,
-                reply_markup=reply_markup
+        edited = False
+        if existing_msg_id:
+            try:
+                if image_url:
+                    await StreamBot.edit_message_caption(
+                        chat_id=int(channel),
+                        message_id=int(existing_msg_id),
+                        caption=caption,
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await StreamBot.edit_message_text(
+                        chat_id=int(channel),
+                        message_id=int(existing_msg_id),
+                        text=caption,
+                        reply_markup=reply_markup
+                    )
+                edited = True
+                LOGGER.info(f"Notification edited successfully in {channel} (Message ID: {existing_msg_id})")
+            except Exception as e:
+                LOGGER.warning(f"Failed to edit message {existing_msg_id}: {e}. Sending new message instead...")
+                existing_msg_id = None
+
+        if not edited:
+            if image_url:
+                sent_msg = await StreamBot.send_photo(
+                    chat_id=int(channel),
+                    photo=image_url,
+                    caption=caption,
+                    reply_markup=reply_markup
+                )
+            else:
+                sent_msg = await StreamBot.send_message(
+                    chat_id=int(channel),
+                    text=caption,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=False
+                )
+            # Database में मैसेज ID सेव करें
+            await db.update_channel_message_id(
+                tmdb_id=tmdb_id,
+                media_type=media_type,
+                message_id=sent_msg.id,
+                season_number=metadata_info.get('season_number'),
+                episode_number=metadata_info.get('episode_number')
             )
-        else:
-            await StreamBot.send_message(
-                chat_id=int(channel),
-                text=caption,
-                reply_markup=reply_markup,
-                disable_web_page_preview=False
-            )
-        LOGGER.info(f"Notification sent successfully to {channel} for {title}")
+            LOGGER.info(f"New notification sent successfully to {channel} for {title} (Message ID: {sent_msg.id})")
     except Exception as e:
         LOGGER.error(f"Failed to send channel notification: {e}")
 
