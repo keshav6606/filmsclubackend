@@ -45,12 +45,52 @@ def get_readable_file_size(size_in_bytes):
     return f'{size_in_bytes:.2f}{SIZE_UNITS[index]}' if index > 0 else f'{size_in_bytes:.2f}B'
 
 
-def clean_filename(filename):
-    pattern = r'_@[A-Za-z]+_|@[A-Za-z]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*'
-    cleaned_filename = re.sub(pattern, '', filename)
-    cleaned_filename = re.sub(r'(?<=\W)(org|AMZN|DDP|DD|NF|AAC|TVDL|5\.1|2\.1|2\.0|7\.0|7\.1|5\.0|~|\b\w+kbps\b)(?=\W)', '', cleaned_filename, flags=re.IGNORECASE)
-    cleaned_filename = re.sub(r'\s+', ' ', cleaned_filename).strip().replace(' .', '.')
-    return cleaned_filename
+def clean_movie_title(raw_title: str) -> str:
+    """
+    किसी भी फाइलनेम या कैप्शन से कचरा हटाकर सिर्फ मूवी/शो का असली नाम निकालता है।
+    यह function निम्नलिखित चीज़ें हटाता है:
+      - सभी प्रकार के URLs (http://, https://, www.)
+      - Telegram usernames/channels (@username)
+      - Channel branding text (जैसे "Movies Reborn -", "@Films_Club" आदि)
+      - Square brackets में URL या username जैसे [t.me/xyz]
+      - Extra whitespace, dashes, और trailing junk
+    """
+    # 1. Square brackets में छुपे URLs या usernames हटाएँ — जैसे [t.me/channel]
+    raw_title = re.sub(r'\[.*?(https?://|www\.|@|t\.me/).*?\]', '', raw_title)
+
+    # 2. सभी HTTP/HTTPS/FTP/WWW URLs हटाएँ
+    raw_title = re.sub(r'https?://\S+|ftp://\S+|www\.\S+', '', raw_title)
+
+    # 3. Telegram @username या @channel_name हटाएँ
+    raw_title = re.sub(r'@[A-Za-z0-9_]+', '', raw_title)
+
+    # 4. जानी-मानी channel branding patterns हटाएँ (case-insensitive)
+    #    जैसे: "Movies Reborn -", "FilmsClub -", "CineZone |" आदि
+    raw_title = re.sub(
+        r'(?i)(movies?\s*reborn|films?\s*club|cine\s*zone|movie\s*flix|filmyzilla|moviesflix|bolly4u|khatrimaza|filmywap|dvdplay|katmovie)\s*[-:|]?\s*',
+        '', raw_title
+    )
+
+    # 5. _@Username_ या Username_ जैसे embedded patterns (underscore style)
+    raw_title = re.sub(r'_@[A-Za-z0-9_]+_|@[A-Za-z0-9_]+_', '', raw_title)
+
+    # 6. कुछ common audio/streaming tags हटाएँ जो title को गंदा करते हैं
+    raw_title = re.sub(
+        r'(?<=[\W_])(AMZN|NF|DSNP|HMAX|ATVP|PCOK|TVDL|DDP|DD|AAC|HDTV|5\.1|2\.0|7\.1|~|\w+kbps)(?=[\W_])',
+        '', raw_title, flags=re.IGNORECASE
+    )
+
+    # 7. Trailing/leading dashes, pipes, और colons साफ करें
+    raw_title = re.sub(r'^[\s\-|:]+|[\s\-|:]+$', '', raw_title)
+
+    # 8. Multiple spaces को एक space में बदलें और ' .' को '.' करें
+    raw_title = re.sub(r'\s+', ' ', raw_title).strip().replace(' .', '.')
+
+    return raw_title
+
+
+# Backward-compatible alias (पुराने code में clean_filename use हो रहा है तो वह भी काम करेगा)
+clean_filename = clean_movie_title
 
 
 

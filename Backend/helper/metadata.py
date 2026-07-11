@@ -1,7 +1,7 @@
 import asyncio
 import PTN
 from Backend.helper.imdb import get_detail, get_season, search_title
-from Backend.helper.pyro import extract_tmdb_id, normalize_languages
+from Backend.helper.pyro import extract_tmdb_id, normalize_languages, clean_movie_title
 from themoviedb import aioTMDb
 from Backend.config import Telegram
 import Backend
@@ -15,7 +15,10 @@ tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
 
 async def metadata(filename: str, media) -> dict:
     try:
-        parsed = PTN.parse(filename)
+        # PTN.parse() से पहले filename साफ करें — URL, @channel, branding सब हटाएँ
+        cleaned_filename = clean_movie_title(filename)
+        LOGGER.debug(f"Raw filename: '{filename}' → Cleaned: '{cleaned_filename}'")
+        parsed = PTN.parse(cleaned_filename)
         if 'excess' in parsed and any('combined' in item.lower() for item in parsed['excess']):
             LOGGER.info(f"Skipping {filename} due to 'combined' in excess")
             return None
