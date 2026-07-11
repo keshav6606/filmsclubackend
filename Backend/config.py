@@ -24,3 +24,6 @@ class Telegram:
     USE_DEFAULT_ID = getenv("USE_DEFAULT_ID", None)
     # Auto-branding: जो @username filename में prefix होगा (@ मत लगाएँ)
     CHANNEL_USERNAME = getenv("CHANNEL_USERNAME", "skysetx01")
+    # Force Join: फाइल देने से पहले यूज़र को इस channel में join करना पड़ेगा
+    # उदाहरण: "-1001234567890" या कुछ नहीं चाहिए तो None रखें
+    FORCE_JOIN_CHANNEL = getenv("FORCE_JOIN_CHANNEL", None)

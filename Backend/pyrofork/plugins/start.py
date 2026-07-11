@@ -9,7 +9,7 @@ from Backend.helper.metadata import metadata
 from Backend.helper.pyro import apply_channel_branding, get_readable_file_size, remove_urls
 from Backend.pyrofork import StreamBot
 from pyrogram import filters, Client
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from os import path as ospath
 from pyrogram.errors import FloodWait
 from pyrogram.enums.parse_mode import ParseMode
@@ -117,6 +117,27 @@ async def delete_messages_after_delay(messages):
             LOGGER.error(f"Error deleting message {msg.id}: {e}")
         await asleep(2)  
 
+
+async def is_user_joined(bot: Client, user_id: int) -> bool:
+    """Check karo ki user ne FORCE_JOIN_CHANNEL join kiya hai ya nahi."""
+    channel = Telegram.FORCE_JOIN_CHANNEL
+    if not channel:
+        return True  # Force join off hai
+    try:
+        member = await bot.get_chat_member(channel, user_id)
+        # Banned/left users ko block karo
+        from pyrogram.enums import ChatMemberStatus
+        if member.status in [
+            ChatMemberStatus.BANNED,
+            ChatMemberStatus.LEFT,
+            ChatMemberStatus.RESTRICTED,
+        ]:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 @StreamBot.on_message(filters.command('start') & filters.private)
 async def start(bot: Client, message: Message):
     LOGGER.info(f"Received command: {message.text}")
@@ -166,6 +187,34 @@ async def start(bot: Client, message: Message):
             return
 
         sent_messages = []
+
+        # --- Force Join Check ---
+        if Telegram.FORCE_JOIN_CHANNEL:
+            joined = await is_user_joined(bot, message.from_user.id)
+            if not joined:
+                channel = Telegram.FORCE_JOIN_CHANNEL
+                # Channel username nikalo (invite link ya @username)
+                try:
+                    chat = await bot.get_chat(channel)
+                    invite = f"https://t.me/{chat.username}" if chat.username else await bot.export_chat_invite_link(channel)
+                    ch_name = chat.title or "Our Channel"
+                except Exception:
+                    invite = f"https://t.me/{Telegram.CHANNEL_USERNAME}"
+                    ch_name = "Our Channel"
+
+                return await message.reply_text(
+                    f"⚠️ **Channel Join Required!**\n\n"
+                    f"📌 Humari movies & series paane ke liye pehle hamara channel join karo:\n"
+                    f"👉 **{ch_name}**\n\n"
+                    f"Channel join karne ke baad 🔁 Retry karo.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton(
+                            f"✅ Join {ch_name}",
+                            url=invite
+                        )
+                    ]])
+                )
+        # --- Force Join Check End ---
         for detail in quality_details:
             decoded_data = await decode_string(detail['id'])
             channel = f"-100{decoded_data['chat_id']}"
@@ -199,8 +248,8 @@ async def start(bot: Client, message: Message):
             create_task(delete_messages_after_delay(sent_messages))
     else:
         await message.reply_text(
-            f"Welcome to @skysetx01! 🎬\n\n"
-            "I am here to provide direct download links for movies & series.\n"
+            "Welcome to @Filmy4uhdbot! 🎬\n\n"
+            "I am here to provide direct download links for movies & series from filmy4uhd.site .\n"
             "📥 Just send a file link to get started!"
         )
 
