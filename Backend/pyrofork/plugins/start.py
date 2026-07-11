@@ -9,7 +9,7 @@ from Backend.helper.metadata import metadata
 from Backend.helper.pyro import apply_channel_branding, get_readable_file_size, remove_urls
 from Backend.pyrofork import StreamBot
 from pyrogram import filters, Client
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from os import path as ospath
 from pyrogram.errors import FloodWait
 from pyrogram.enums.parse_mode import ParseMode
@@ -606,15 +606,26 @@ async def delete(bot: Client, message: Message):
         await message.reply_text(f"An error occurred: {str(e)}")
 
 
-@StreamBot.on_message(filters.private & filters.text & ~filters.command(["start", "help", "user", "restart", "log", "caption", "tmdb", "set", "delete"]))
+@StreamBot.on_message(
+    (filters.private & filters.text & ~filters.command(["start", "help", "user", "restart", "log", "caption", "tmdb", "set", "delete", "search", "find"])) |
+    (filters.command(["search", "find"]) & (filters.group | filters.private))
+)
 async def bot_search_handler(bot: Client, message: Message):
     """
-    यूज़र बोट चैट में कुछ भी टेक्स्ट (मूवी का नाम) लिखकर सेंड करेगा,
-    तो बोट उसे डेटाबेस से फ़ेच करके पोस्टर इमेज, उपलब्ध क्वालिटीज़ और Vercel लिंक के साथ रिप्लाई देगा।
+    सर्च हैंडलर:
+    - प्राइवेट चैट में: कोई भी टेक्स्ट (मूवी का नाम) भेजने पर सीधे काम करेगा।
+    - ग्रुप चैट में: /search <मूवी नाम> या /find <मूवी नाम> कमांड पर काम करेगा।
     """
-    query = message.text.strip()
-    if not query:
-        return
+    if message.command:
+        # यदि यह /search या /find जैसी कमांड है
+        query = " ".join(message.command[1:]).strip()
+        if not query:
+            return await message.reply_text("❌ Usage: `/search <movie name>` or `/find <movie name>`")
+    else:
+        # यदि यह प्राइवेट इनबॉक्स में डायरेक्ट सेंड किया गया टेक्स्ट है
+        query = message.text.strip()
+        if not query:
+            return
 
     # 1. Force Join Check
     if Telegram.FORCE_JOIN_CHANNEL:
@@ -719,7 +730,7 @@ async def bot_search_handler(bot: Client, message: Message):
             )
             
         text = f"🎬 **TMDb Search Results (Not Uploaded Yet)** 🎬\n"
-        text += f"⚠️ *Note: These are not in our database yet, but you can visit their pages to request them.*\n\n"
+        text += f"⚠️ *Note: These are not in our database yet, but you can visit their pages or request the admin below to upload them.*\n\n"
         buttons = []
         
         for index, (item, media_type) in enumerate(combined_tmdb[:5], 1):
@@ -742,7 +753,10 @@ async def bot_search_handler(bot: Client, message: Message):
                 f"🔗 [Request Page]({website_link})\n\n"
             )
             
-            buttons.append([InlineKeyboardButton(f"🌐 Request: {title} ({year})", url=website_link)])
+            buttons.append([
+                InlineKeyboardButton(f"🌐 Link {index}", url=website_link),
+                InlineKeyboardButton(f"🙋‍♂️ Request Upload {index}", callback_data=f"req_{media_type}_{tmdb_id}")
+            ])
             
         await searching_msg.delete()
         return await message.reply_text(
@@ -754,4 +768,65 @@ async def bot_search_handler(bot: Client, message: Message):
     except Exception as e:
         LOGGER.error(f"Error in bot search handler: {e}")
         await message.reply_text("❌ An error occurred while searching. Please try again later.")
+
+
+@StreamBot.on_callback_query(filters.regex(r"^req_"))
+async def request_callback_handler(bot: Client, query: CallbackQuery):
+    """
+    जब कोई यूजर '🙋‍♂️ Request Upload' पर क्लिक करता है,
+    तो यह बोट ओनर (Telegram.OWNER_ID) को सीधे टेलीग्राम पर अनुरोध भेजता है।
+    """
+    user = query.from_user
+    data_parts = query.data.split("_")
+    if len(data_parts) != 3:
+        return await query.answer("Invalid request data.", show_alert=True)
+        
+    media_type = data_parts[1]
+    tmdb_id = int(data_parts[2])
+    
+    try:
+        if media_type == "movie":
+            details = await tmdb.movie(tmdb_id).details()
+            title = details.title
+            year = details.release_date.year if details.release_date else 0
+        else:
+            details = await tmdb.tv(tmdb_id).details()
+            title = details.name
+            year = details.first_air_date.year if details.first_air_date else 0
+            
+        # Owner ID पर रिक्वेस्ट फॉरवर्ड करें
+        owner_id = Telegram.OWNER_ID
+        request_text = (
+            f"📢 **New Media Request Received!** 📢\n\n"
+            f"🎥 **Title:** {title} ({year})\n"
+            f"🆔 **TMDB ID:** `{tmdb_id}` ({media_type.upper()})\n\n"
+            f"👤 **Requested By:** {user.mention} (ID: `{user.id}`)\n"
+            f"🕒 **Time:** {now.strftime('%d/%m/%y %I:%M:%S %p')}"
+        )
+        
+        await bot.send_message(chat_id=owner_id, text=request_text)
+        
+        # User को अलर्ट दिखाएं
+        await query.answer(f"✅ Your request for '{title} ({year})' has been sent to the Admin!", show_alert=True)
+        
+        # बटन को 'Requested' में अपडेट कर दें
+        # मूल बटन्स में से केवल क्लिक किए गए बटन को बदलें
+        new_buttons = []
+        for row in query.message.reply_markup.inline_keyboard:
+            new_row = []
+            for btn in row:
+                if btn.callback_data == query.data:
+                    new_row.append(InlineKeyboardButton("✅ Requested", callback_data="none"))
+                else:
+                    new_row.append(btn)
+            new_buttons.append(new_row)
+            
+        try:
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(new_buttons))
+        except Exception:
+            pass
+            
+    except Exception as e:
+        LOGGER.error(f"Error in request callback handler: {e}")
+        await query.answer("❌ Failed to send request. Please try again later.", show_alert=True)
         
