@@ -175,7 +175,7 @@ async def start(bot: Client, message: Message):
                 tmdb_id, season, episode, quality = parts
                 tmdb_id = int(tmdb_id)
                 season = int(season)
-                episode = int(episode)
+                episode = int(episode) if episode.isdigit() else episode
                 quality_details = await db.get_quality_details(tmdb_id, quality, season, episode)
             except ValueError:
                 LOGGER.error(f"Error parsing TV show command: {usr_cmd}")
@@ -366,7 +366,7 @@ async def send_channel_notification(metadata_info):
             for season in media_details.get('seasons', []):
                 if season.get('season_number') == season_num:
                     for episode in season.get('episodes', []):
-                        if episode.get('episode_number') == episode_num:
+                        if str(episode.get('episode_number')) == str(episode_num):
                             existing_msg_id = episode.get('channel_message_id')
                             for item in episode.get('telegram', []):
                                 qualities.add(item.get('quality', 'HD'))
@@ -375,8 +375,12 @@ async def send_channel_notification(metadata_info):
 
         # मीडिया टाइप के अनुसार टाइटल तैयार करें
         if media_type == "tv" and 'season_number' in metadata_info and 'episode_number' in metadata_info:
-            ep_title = metadata_info.get('episode_title', f"Episode {metadata_info['episode_number']}")
-            title_str = f"🎥 **Title:** {title} - S{metadata_info['season_number']}E{metadata_info['episode_number']} ({ep_title}) [{year}]"
+            ep_num_str = str(metadata_info['episode_number'])
+            ep_title = metadata_info.get('episode_title', f"Episode {ep_num_str}")
+            if '-' in ep_num_str or 'to' in ep_num_str or 'combined' in ep_num_str.lower():
+                title_str = f"🎥 **Title:** {title} - S{metadata_info['season_number']} E{ep_num_str} ({ep_title}) [{year}]"
+            else:
+                title_str = f"🎥 **Title:** {title} - S{metadata_info['season_number']}E{ep_num_str} ({ep_title}) [{year}]"
         else:
             title_str = f"🎥 **Title:** {title} ({year})"
 
@@ -465,7 +469,7 @@ async def debounce_notification(metadata_info):
     episode_number = metadata_info.get('episode_number', None)
     
     # Unique task key
-    task_key = (tmdb_id, media_type, season_number, episode_number)
+    task_key = (tmdb_id, media_type, season_number, str(episode_number))
 
     # अगर पहले से कोई पेंडिंग नोटिफिकेशन शेड्यूल्ड है, उसे कैंसिल करें
     if task_key in notification_tasks:

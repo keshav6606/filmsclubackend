@@ -94,7 +94,7 @@ class Database:
                 for episode in season["episodes"]:
                     existing_episode = next(
                         (e for e in existing_season["episodes"] 
-                         if e["episode_number"] == episode["episode_number"]), None)
+                         if str(e["episode_number"]) == str(episode["episode_number"])), None)
                     
                     if existing_episode:
                         for quality in episode["telegram"]:
@@ -381,7 +381,7 @@ class Database:
         self,
         tmdb_id: int,
         season_number: Optional[int] = None,
-        episode_number: Optional[int] = None
+        episode_number: Optional[Union[int, str]] = None
     ) -> Optional[dict]:
         if episode_number is not None and season_number is not None:
             tv_show = await self.tv_collection.find_one({"tmdb_id": tmdb_id})
@@ -390,7 +390,7 @@ class Database:
             for season in tv_show.get("seasons", []):
                 if season.get("season_number") == season_number:
                     for episode in season.get("episodes", []):
-                        if episode.get("episode_number") == episode_number:
+                        if str(episode.get("episode_number")) == str(episode_number):
                             details = self._convert_object_id(episode)
                             details.update({
                                 "tmdb_id": tmdb_id,
@@ -437,7 +437,7 @@ class Database:
         tmdb_id: int,
         quality: str,
         season: Optional[int] = None,
-        episode: Optional[int] = None
+        episode: Optional[Union[int, str]] = None
     ) -> List[Dict[str, int]]:
         if season is None:
             # Movie case
@@ -468,7 +468,7 @@ class Database:
                     
                     # Filter by specific episode if provided
                     if episode is not None:
-                        episodes = [ep for ep in episodes if ep["episode_number"] == episode]
+                        episodes = [ep for ep in episodes if str(ep["episode_number"]) == str(episode)]
                     
                     for ep in episodes:
                         results.extend([
@@ -501,7 +501,7 @@ class Database:
         media_type: str,
         message_id: int,
         season_number: Optional[int] = None,
-        episode_number: Optional[int] = None
+        episode_number: Optional[Union[int, str]] = None
     ) -> bool:
         try:
             if media_type == "movie":

@@ -9,9 +9,75 @@ from Backend.logger import LOGGER
 import traceback
 
 
+import re
+from typing import Union, Tuple, Optional
+
 DELAY = 2
 
 tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
+
+
+def extract_season_and_episode(cleaned_filename: str, parsed: dict) -> Tuple[Optional[int], Optional[Union[int, str]]]:
+    season = parsed.get('season')
+    episode = parsed.get('episode')
+
+    # Resolve season
+    if isinstance(season, list):
+        season = season[0] if season else None
+
+    if season is None:
+        season_match = re.search(r'(?i)\bS(?:eason)?\s*0*(\d+)\b', cleaned_filename)
+        if season_match:
+            season = int(season_match.group(1))
+
+    # Check for explicit episode range regex patterns in cleaned_filename
+    range_patterns = [
+        r'(?i)\bS?\d*[\s._-]*E(?:pisode)?\s*0*(\d+)[\s._-]*(?:-|to|~|&)[\s._-]*E(?:pisode)?\s*0*(\d+)\b',
+        r'(?i)\bE(?:pisode)?\s*0*(\d+)[\s._-]*(?:-|to|~|&)[\s._-]*E(?:pisode)?\s*0*(\d+)\b',
+        r'(?i)\b(?:Ep|Episode|E)?\s*0*(\d+)[\s._-]*(?:-|to|~|&)[\s._-]*0*(\d+)\b(?:\s*(?:all|combined|episodes))?',
+        r'(?i)\b0*(\d+)[\s._-]*(?:-|to)[\s._-]*0*(\d+)[\s._-]*(?:all|combined|episodes)\b',
+    ]
+
+    detected_range = None
+    for pattern in range_patterns:
+        match = re.search(pattern, cleaned_filename)
+        if match:
+            start_ep = int(match.group(1))
+            end_ep = int(match.group(2))
+            if 0 < start_ep < end_ep:
+                detected_range = (start_ep, end_ep)
+                break
+
+    if detected_range:
+        start_ep, end_ep = detected_range
+        return season, f"{start_ep}-{end_ep}"
+
+    # If PTN returned episode as a list e.g. [1, 9] or [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    if isinstance(episode, list):
+        if len(episode) > 0:
+            min_ep = min(episode)
+            max_ep = max(episode)
+            if min_ep < max_ep:
+                return season, f"{min_ep}-{max_ep}"
+            else:
+                return season, min_ep
+        else:
+            episode = None
+
+    if episode is not None:
+        return season, episode
+
+    # Single episode regex fallback if PTN missed it
+    single_match = re.search(r'(?i)\bE(?:pisode)?\s*0*(\d+)\b', cleaned_filename)
+    if single_match:
+        return season, int(single_match.group(1))
+
+    # General "Combined" or "All Episodes" without numbers
+    if any(kw in cleaned_filename.lower() for kw in ['combined', 'all episodes', 'complete season', 'full season', 'zip', 'batch']):
+        return season, "Combined"
+
+    return season, None
+
 
 async def metadata(filename: str, media) -> dict:
     try:
@@ -19,25 +85,13 @@ async def metadata(filename: str, media) -> dict:
         cleaned_filename = clean_movie_title(filename)
         LOGGER.debug(f"Raw filename: '{filename}' → Cleaned: '{cleaned_filename}'")
         parsed = PTN.parse(cleaned_filename)
-        if 'excess' in parsed and any('combined' in item.lower() for item in parsed['excess']):
-            LOGGER.info(f"Skipping {filename} due to 'combined' in excess")
-            return None
 
         title = parsed.get('title')
-        season = parsed.get('season')
-        episode = parsed.get('episode')
+        season, episode = extract_season_and_episode(cleaned_filename, parsed)
         year = parsed.get('year')
         quality = parsed.get('resolution')
         languages = normalize_languages(parsed.get('language'))
         rip = parsed.get('quality')
-
-        if isinstance(season, list) or isinstance(episode, list):
-            LOGGER.warning(f"Invalid format: Season/Episode is list — {filename}, parsed: {parsed}")
-            return None
-
-        if season and not episode:
-            LOGGER.warning(f"Missing episode for season: {filename}, parsed: {parsed}")
-            return None
 
         try:
             default_id = extract_tmdb_id(Backend.USE_DEFAULT_ID)
@@ -54,7 +108,7 @@ async def metadata(filename: str, media) -> dict:
 
         if title:
             if season and episode:
-                LOGGER.info(f"Fetching TV metadata for: {title} S{season}E{episode}")
+                LOGGER.info(f"Fetching TV metadata for: {title} S{season} Episode {episode}")
                 return await fetch_tv_metadata(title, season, episode, year, quality, default_id, languages, rip)
             else:
                 LOGGER.info(f"Fetching movie metadata for: {title} ({year})")
@@ -70,10 +124,18 @@ async def metadata(filename: str, media) -> dict:
 
 
 
-async def fetch_tv_metadata(title: str, season: int, episode: int, year=None, quality=None, default_id=None, languages=None, rip=None) -> dict:
+async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], year=None, quality=None, default_id=None, languages=None, rip=None) -> dict:
     try:
         tv_details, ep_details, use_tmdb = None, None, False
         imdb_id = default_id if default_id and default_id.startswith("tt") else None
+
+        # Parse numeric episode for API detail fetching
+        ep_nums = re.findall(r'\d+', str(episode))
+        fetch_ep_id = int(ep_nums[0]) if ep_nums else 1
+
+        is_combined = False
+        if isinstance(episode, str) and ('-' in episode or 'to' in episode or 'Combined' in episode or 'all' in episode.lower()):
+            is_combined = True
 
         if not imdb_id:
             result = await search_title(query=f"{title} {year}" if year else title, type="tvSeries")
@@ -84,12 +146,12 @@ async def fetch_tv_metadata(title: str, season: int, episode: int, year=None, qu
                 await asyncio.sleep(DELAY)
                 tv_details = await get_detail(imdb_id=imdb_id)
                 await asyncio.sleep(DELAY)
-                ep_details = await get_season(imdb_id=imdb_id, season_id=season, episode_id=episode)
+                ep_details = await get_season(imdb_id=imdb_id, season_id=season, episode_id=fetch_ep_id)
             except Exception as e:
                 LOGGER.warning(f"IMDb TV fetch failed for ID {imdb_id}: {e}")
                 tv_details, ep_details = None, None
 
-        if not tv_details or not ep_details:
+        if not tv_details:
             use_tmdb = True
             await asyncio.sleep(DELAY)
             tmdb_results = await tmdb.search().tv(query=title)
@@ -99,7 +161,21 @@ async def fetch_tv_metadata(title: str, season: int, episode: int, year=None, qu
             tv_id = tmdb_results[0].id
             LOGGER.debug(f"TMDb ID found: {tv_id}")
             tv_details = await tmdb.tv(tv_id).details()
-            ep_details = await tmdb.episode(tv_id, season, episode).details()
+            try:
+                ep_details = await tmdb.episode(tv_id, season, fetch_ep_id).details()
+            except Exception as e:
+                LOGGER.warning(f"TMDb episode details fetch failed for S{season}E{fetch_ep_id}: {e}")
+                ep_details = None
+        elif not ep_details:
+            # If IMDb had tv_details but failed ep_details, try TMDb for episode
+            try:
+                tmdb_results = await tmdb.search().tv(query=title)
+                if tmdb_results:
+                    tv_id = tmdb_results[0].id
+                    ep_details = await tmdb.episode(tv_id, season, fetch_ep_id).details()
+            except Exception as e:
+                LOGGER.warning(f"TMDb fallback episode fetch failed: {e}")
+                ep_details = None
 
         if use_tmdb:
             tmdb_id = tv_details.id
@@ -113,8 +189,11 @@ async def fetch_tv_metadata(title: str, season: int, episode: int, year=None, qu
             backdrop = f"https://image.tmdb.org/t/p/original{tv_details.backdrop_path}" if tv_details.backdrop_path else ''
             status = tv_details.status or 'Unknown'
             genres = [genre.name for genre in tv_details.genres] if tv_details.genres else []
-            ep_title = ep_details.name if ep_details and hasattr(ep_details, 'name') else f"S{season}E{episode}"
-            ep_backdrop = f"https://image.tmdb.org/t/p/original{ep_details.still_path}" if ep_details and ep_details.still_path else ''
+            if is_combined:
+                ep_title = f"Episode {episode} Combined"
+            else:
+                ep_title = ep_details.name if ep_details and hasattr(ep_details, 'name') else f"S{season}E{episode}"
+            ep_backdrop = f"https://image.tmdb.org/t/p/original{ep_details.still_path}" if ep_details and hasattr(ep_details, 'still_path') and ep_details.still_path else backdrop
         else:
             tmdb_id = tv_details['id'].replace("tt", "")
             show_title = tv_details.get('title', title)
@@ -126,8 +205,11 @@ async def fetch_tv_metadata(title: str, season: int, episode: int, year=None, qu
             poster = tv_details.get('image', '')
             backdrop = ''
             genres = tv_details.get('genre', [])
-            ep_title = ep_details.get('title', f"S{season}E{episode}") if ep_details else f"S{season}E{episode}"
-            ep_backdrop = ep_details.get('image', '') if ep_details else ''
+            if is_combined:
+                ep_title = f"Episode {episode} Combined"
+            else:
+                ep_title = ep_details.get('title', f"S{season}E{episode}") if ep_details else f"S{season}E{episode}"
+            ep_backdrop = ep_details.get('image', '') if ep_details else poster
             try:
                 await asyncio.sleep(DELAY)
                 fallback_results = await tmdb.search().tv(query=show_title)
@@ -164,11 +246,11 @@ async def fetch_tv_metadata(title: str, season: int, episode: int, year=None, qu
             "rip": rip or 'Blu-ray'
         }
 
-        LOGGER.info(f"Metadata successfully fetched for {show_title} S{season}E{episode}")
+        LOGGER.info(f"Metadata successfully fetched for {show_title} S{season} Episode {episode}")
         return result
 
     except Exception as e:
-        LOGGER.error(f"Error fetching TV metadata for '{title}' S{season}E{episode}: {e}", exc_info=True)
+        LOGGER.error(f"Error fetching TV metadata for '{title}' S{season} Episode {episode}: {e}", exc_info=True)
         return None
 
 

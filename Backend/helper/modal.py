@@ -9,7 +9,7 @@ class QualityDetail(BaseModel):
     size: str = Field(..., description="Size of the File")
 
 class Episode(BaseModel):
-    episode_number: int = Field(..., description="Episode number within the season")
+    episode_number: Union[int, str] = Field(..., description="Episode number within the season")
     title: str = Field(..., description="Title of the episode")
     episode_backdrop: str = Field(..., description="Backdrop of Episode")
     telegram: Optional[List[QualityDetail]] = Field(None, description="List of available quality details")

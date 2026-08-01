@@ -79,7 +79,7 @@ async def watch(
     request: Request, 
     tmdb_id: int, 
     season_number: Optional[int] = Query(None), 
-    episode_number: Optional[int] = Query(None)
+    episode_number: Optional[Union[int, str]] = Query(None)
 ):
     """
     Serve the appropriate HTML template for watching a movie or a specific TV episode.
@@ -146,7 +146,7 @@ async def get_sorted_movies(
 async def get_media_details(
     tmdb_id: int, 
     season_number: Optional[int] = Query(None), 
-    episode_number: Optional[int] = Query(None)
+    episode_number: Optional[Union[int, str]] = Query(None)
 ) -> Union[dict, None]:
     """
     FastAPI endpoint to get details of a document, specific season, or episode
