@@ -167,26 +167,91 @@ def remove_urls(text):
 
 
 
-def normalize_languages(language):
+LANGUAGE_MAP = {
+    'hi': 'Hindi', 'hin': 'Hindi', 'hindi': 'Hindi',
+    'en': 'English', 'eng': 'English', 'english': 'English',
+    'ta': 'Tamil', 'tam': 'Tamil', 'tamil': 'Tamil',
+    'te': 'Telugu', 'tel': 'Telugu', 'telugu': 'Telugu',
+    'ml': 'Malayalam', 'mal': 'Malayalam', 'malayalam': 'Malayalam',
+    'bn': 'Bengali', 'ben': 'Bengali', 'bengali': 'Bengali',
+    'kn': 'Kannada', 'kan': 'Kannada', 'kannada': 'Kannada',
+    'mr': 'Marathi', 'mar': 'Marathi', 'marathi': 'Marathi',
+    'pa': 'Punjabi', 'pun': 'Punjabi', 'punjabi': 'Punjabi',
+    'gu': 'Gujarati', 'guj': 'Gujarati', 'gujarati': 'Gujarati',
+    'bho': 'Bhojpuri', 'bhojpuri': 'Bhojpuri',
+    'ko': 'Korean', 'kor': 'Korean', 'korean': 'Korean',
+    'ja': 'Japanese', 'jap': 'Japanese', 'japanese': 'Japanese',
+    'zh': 'Chinese', 'chi': 'Chinese', 'chinese': 'Chinese',
+    'es': 'Spanish', 'spa': 'Spanish', 'spanish': 'Spanish',
+    'fr': 'French', 'fre': 'French', 'french': 'French',
+    'de': 'German', 'ger': 'German', 'german': 'German',
+    'dual': 'Dual Audio', 'dual audio': 'Dual Audio',
+    'multi': 'Multi Audio', 'multi audio': 'Multi Audio', 'org': 'Org Audio'
+}
+
+LANG_CODE_MAP = {
+    'Hindi': 'HI', 'English': 'EN', 'Tamil': 'TA', 'Telugu': 'TE',
+    'Malayalam': 'ML', 'Bengali': 'BN', 'Kannada': 'KN', 'Marathi': 'MR',
+    'Punjabi': 'PA', 'Gujarati': 'GU', 'Bhojpuri': 'BH', 'Korean': 'KO',
+    'Japanese': 'JA', 'Chinese': 'ZH', 'Spanish': 'ES', 'French': 'FR',
+    'German': 'DE', 'Dual Audio': 'DUAL', 'Multi Audio': 'MULTI', 'Org Audio': 'ORG'
+}
+
+def normalize_languages(language=None, filename: str = "") -> list:
     """
-    Normalize the language input(s) to a list of ISO 639-1 codes using pycountry.
+    Normalize language input(s) or extract languages from filename.
+    Returns clean full language names (e.g. ['Hindi', 'English'] or ['Dual Audio']).
     """
-    if not language:
-        return []
+    found = []
 
     if isinstance(language, str):
         language = [language]
+    elif not language:
+        language = []
 
-    normalized_languages = []
     for lang in language:
-        try:
-            lang_code = pycountry.languages.get(name=lang).alpha_2
-            if lang_code:
-                normalized_languages.append(lang_code)
-        except AttributeError:
-            print(f"Language '{lang}' not found or does not have an ISO 639-1 code.")
+        l_clean = str(lang).strip().lower()
+        if l_clean in LANGUAGE_MAP:
+            found.append(LANGUAGE_MAP[l_clean])
+        else:
+            try:
+                p_lang = pycountry.languages.get(name=lang) or pycountry.languages.get(alpha_2=lang)
+                if p_lang:
+                    found.append(p_lang.name)
+                else:
+                    found.append(str(lang).capitalize())
+            except Exception:
+                found.append(str(lang).capitalize())
 
-    return normalized_languages
+    if filename:
+        fn_lower = filename.lower()
+        if 'dual' in fn_lower and 'Dual Audio' not in found:
+            found.append('Dual Audio')
+        if 'multi' in fn_lower and 'Multi Audio' not in found:
+            found.append('Multi Audio')
+
+        for key, name in LANGUAGE_MAP.items():
+            if len(key) >= 3 and key not in ['dual', 'multi']:
+                pattern = r'(?i)\b' + re.escape(key) + r'\b'
+                if re.search(pattern, filename) and name not in found:
+                    found.append(name)
+
+    if not found:
+        found = ['Hindi']
+
+    return list(dict.fromkeys(found))
+
+
+def get_language_short_codes(languages: list) -> list:
+    """
+    Returns short tag codes (e.g., ['HI', 'EN'], ['DUAL']).
+    """
+    codes = []
+    for lang in (languages or []):
+        lang_str = str(lang).strip()
+        code = LANG_CODE_MAP.get(lang_str, lang_str[:2].upper())
+        codes.append(code)
+    return list(dict.fromkeys(codes))
 
 
 async def cmd_exec(cmd, shell=False):

@@ -128,7 +128,9 @@ class Database:
 
         if updated:
             existing_media["updated_on"] = datetime.utcnow()
-            existing_media["languages"] = tv_show_dict["languages"]
+            existing_langs = existing_media.get("languages", [])
+            new_langs = tv_show_dict.get("languages", [])
+            existing_media["languages"] = list(dict.fromkeys(existing_langs + new_langs))
             existing_media["rip"] = tv_show_dict["rip"]
             existing_media["keywords"] = tv_show_dict.get("keywords", [])
             existing_media["seo_title"] = tv_show_dict.get("seo_title")
@@ -175,7 +177,7 @@ class Database:
         for quality in movie_dict["telegram"]:
             existing_quality = next(
                 (q for q in existing_media["telegram"] 
-                 if q["quality"] == quality["quality"]), None)
+                 if q["quality"] == quality["quality"] and (not q.get("language") or q.get("language") == quality.get("language"))), None)
             
             if existing_quality:
                 existing_quality.update(quality)
@@ -186,7 +188,9 @@ class Database:
 
         if updated:
             existing_media["updated_on"] = datetime.utcnow()
-            existing_media["languages"] = movie_dict["languages"]
+            existing_langs = existing_media.get("languages", [])
+            new_langs = movie_dict.get("languages", [])
+            existing_media["languages"] = list(dict.fromkeys(existing_langs + new_langs))
             existing_media["rip"] = movie_dict["rip"]
             existing_media["keywords"] = movie_dict.get("keywords", [])
             existing_media["seo_title"] = movie_dict.get("seo_title")
@@ -213,6 +217,7 @@ class Database:
         from Backend.helper.pyro import apply_channel_branding
         # फाइल नाम में से बाहरी @username हटाकर अपना @skysetx01 tag लगाएँ
         branded_name = apply_channel_branding(name)
+        lang_label = ", ".join(metadata_info.get('languages', [])) if metadata_info.get('languages') else "Hindi"
 
         if metadata_info['media_type'] == "movie":
             media = MovieSchema(
@@ -235,7 +240,8 @@ class Database:
                         quality=metadata_info['quality'],
                         id=encoded_string,
                         name=branded_name,
-                        size=size
+                        size=size,
+                        language=lang_label
                     )]
             )
             return await self.update_movie(media)
@@ -270,7 +276,8 @@ class Database:
                                         quality=metadata_info['quality'],
                                         id=encoded_string,
                                         name=branded_name,
-                                        size=size
+                                        size=size,
+                                        language=lang_label
                                     )
                                 ]
                             )
@@ -478,7 +485,7 @@ class Database:
             if not doc:
                 return []
             return [
-                {"id": item["id"], "name": item["name"]}
+                {"id": item["id"], "name": item["name"], "language": item.get("language")}
                 for item in doc.get("telegram", [])
                 if item["quality"] == quality
             ]
@@ -502,7 +509,7 @@ class Database:
                     
                     for ep in episodes:
                         results.extend([
-                            {"id": t["id"], "name": t["name"]}
+                            {"id": t["id"], "name": t["name"], "language": t.get("language")}
                             for t in ep.get("telegram", [])
                             if t["quality"] == quality
                         ])

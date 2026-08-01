@@ -163,7 +163,13 @@ async def start(bot: Client, message: Message):
         usr_cmd = command_part[len("file_"):].strip()
         
         parts = usr_cmd.split("_")
-        
+
+        requested_lang = None
+        possible_lang = parts[-1].lower()
+        if possible_lang in ['hindi', 'english', 'tamil', 'telugu', 'malayalam', 'bengali', 'kannada', 'marathi', 'punjabi', 'gujarati', 'dual', 'multi', 'all'] or possible_lang.startswith('lang-'):
+            requested_lang = possible_lang
+            parts = parts[:-1]
+
         if len(parts) == 2:
             try:
                 tmdb_id, quality = parts
@@ -174,7 +180,7 @@ async def start(bot: Client, message: Message):
                 LOGGER.error(f"Error parsing movie command: {usr_cmd}")
                 await message.reply_text("Invalid command format for movie.")
                 return
-        
+
         elif len(parts) == 3:
             try:
                 tmdb_id, season, quality = parts
@@ -200,6 +206,46 @@ async def start(bot: Client, message: Message):
         else:
             await message.reply_text("Invalid command format.")
             return
+
+        if not quality_details:
+            await message.reply_text("Requested media file not found.")
+            return
+
+        # Check available languages among quality_details
+        lang_groups = {}
+        for detail in quality_details:
+            l_val = detail.get('language') or 'Hindi'
+            lang_groups.setdefault(l_val.strip(), []).append(detail)
+
+        # If user did NOT specify a language filter AND multiple language versions exist:
+        if len(lang_groups) > 1 and not requested_lang:
+            bot_username = (bot.me.username if bot.me and bot.me.username else Telegram.CHANNEL_USERNAME or 'Filmy4uhdbot').lstrip('@')
+            keyboard = []
+            for l_name in lang_groups.keys():
+                flag = "🇮🇳 " if "Hindi" in l_name else "🇬🇧 " if "English" in l_name else "🔊 "
+                clean_lang = l_name.replace(" ", "-").lower()
+                keyboard.append([InlineKeyboardButton(
+                    f"{flag}{l_name} ({len(lang_groups[l_name])} File)",
+                    url=f"https://t.me/{bot_username}?start={command_part}_{clean_lang}"
+                )])
+
+            keyboard.append([InlineKeyboardButton("🌐 Send All Languages", url=f"https://t.me/{bot_username}?start={command_part}_all")])
+
+            return await message.reply_text(
+                "🎧 **Select Audio / Language:**\n\n"
+                "This file is available in multiple languages. Please choose your preferred language below:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        # If user specified a language filter and it's not "all":
+        if requested_lang and requested_lang != 'all':
+            req_clean = requested_lang.replace("-", " ").lower()
+            filtered_details = [
+                d for d in quality_details 
+                if req_clean in (d.get('language') or '').lower() or (d.get('language') or '').lower() in req_clean
+            ]
+            if filtered_details:
+                quality_details = filtered_details
 
         sent_messages = []
 

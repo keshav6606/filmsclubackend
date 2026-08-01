@@ -83,8 +83,11 @@ def generate_seo_metadata(title: str, year: int, genres: list, languages: list, 
     media_label = "TV Show" if media_type == "tv" else "Movie"
     quality_label = quality or "1080p"
     lang_str = ", ".join(languages) if languages else "Hindi"
+    from Backend.helper.pyro import get_language_short_codes
+    short_codes = get_language_short_codes(languages)
+    short_codes_str = "/".join(short_codes) if short_codes else "HI"
 
-    seo_title = f"Watch {title} ({year}) Online - Download {quality_label} {media_label}"
+    seo_title = f"Watch {title} ({year}) [{short_codes_str}] Online - Download {quality_label} {media_label}"
 
     keywords = [
         title,
@@ -93,6 +96,7 @@ def generate_seo_metadata(title: str, year: int, genres: list, languages: list, 
         f"{title} {quality_label}",
         f"{title} {media_label}",
         f"{title} {lang_str}",
+        f"{title} {short_codes_str}",
         "filmy4uhd",
         "movies reborn",
         media_label,
@@ -100,6 +104,8 @@ def generate_seo_metadata(title: str, year: int, genres: list, languages: list, 
         "HD Download",
         "Free Stream"
     ]
+    keywords.extend(languages or [])
+    keywords.extend(short_codes)
 
     if genres:
         keywords.extend(genres)
@@ -125,7 +131,7 @@ async def metadata(filename: str, media) -> dict:
         season, episode = extract_season_and_episode(cleaned_filename, parsed)
         year = parsed.get('year')
         quality = parsed.get('resolution')
-        languages = normalize_languages(parsed.get('language'))
+        languages = normalize_languages(parsed.get('language'), filename)
         rip = parsed.get('quality')
 
         try:

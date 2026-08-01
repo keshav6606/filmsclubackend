@@ -7,6 +7,7 @@ class QualityDetail(BaseModel):
     id: str = Field(..., description="Unique hash for the video")
     name: str = Field(..., description="Original Filename of telegram file")
     size: str = Field(..., description="Size of the File")
+    language: Optional[str] = Field(None, description="Language of this specific file (e.g., Hindi, English, Dual Audio)")
 
 class Episode(BaseModel):
     episode_number: Union[int, str] = Field(..., description="Episode number within the season")
