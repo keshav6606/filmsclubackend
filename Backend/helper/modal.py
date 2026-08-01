@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Optional
+from typing import List, Optional, Union
 
 class QualityDetail(BaseModel):
     quality: str = Field(..., description="Quality of the video (e.g., 1080p, 720p)")
