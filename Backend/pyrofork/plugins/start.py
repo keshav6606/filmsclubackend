@@ -287,9 +287,14 @@ async def start(bot: Client, message: Message):
                 file = await bot.get_messages(int(channel), int(msg_id))
                 media = file.document or file.video
                 if media:
+                    file_caption = (
+                        f"{name}\n\n"
+                        f"⏱️ **Forward this file to your Saved Messages.**\n"
+                        f"This file will be deleted from the bot in 5 minutes due to copyright protection."
+                    )
                     sent_msg = await message.reply_cached_media(
                         file_id=media.file_id,
-                        caption=f'{name}'
+                        caption=file_caption
                     )
                     sent_messages.append(sent_msg)
                     await asleep(1)
@@ -304,15 +309,6 @@ async def start(bot: Client, message: Message):
         if sent_messages:
             bot_username = (bot.me.username if bot.me and bot.me.username else Telegram.CHANNEL_USERNAME or 'Filmy4uhdbot').lstrip('@')
             reget_url = f"https://t.me/{bot_username}?start={command_part}"
-
-            warning_msg = await message.reply_text(
-                "⏱️ **Forward these files to your Saved Messages.**\n\n"
-                "These files will be deleted from the bot in 5 minutes due to copyright protection.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔁 Get File Again", url=reget_url)
-                ]])
-            )
-            sent_messages.append(warning_msg)
             create_task(delete_messages_after_delay(sent_messages, message.chat.id, reget_url))
     else:
         await message.reply_text(
