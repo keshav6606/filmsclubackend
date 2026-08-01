@@ -32,10 +32,10 @@ def extract_season_and_episode(cleaned_filename: str, parsed: dict) -> Tuple[Opt
 
     # Check for explicit episode range regex patterns in cleaned_filename
     range_patterns = [
-        r'(?i)\bS?\d*[\s._-]*E(?:pisode)?\s*0*(\d+)[\s._-]*(?:-|to|~|&)[\s._-]*E(?:pisode)?\s*0*(\d+)\b',
-        r'(?i)\bE(?:pisode)?\s*0*(\d+)[\s._-]*(?:-|to|~|&)[\s._-]*E(?:pisode)?\s*0*(\d+)\b',
-        r'(?i)\b(?:Ep|Episode|E)?\s*0*(\d+)[\s._-]*(?:-|to|~|&)[\s._-]*0*(\d+)\b(?:\s*(?:all|combined|episodes))?',
-        r'(?i)\b0*(\d+)[\s._-]*(?:-|to)[\s._-]*0*(\d+)[\s._-]*(?:all|combined|episodes)\b',
+        r'(?i)\bS?\d*[\s._-]*E(?:pisode)?\s*0*(\d+)[\s._-]*(?:-|_|to|~|&|\s)+E?(?:pisode)?\s*0*(\d+)\b',
+        r'(?i)\bE(?:pisode)?\s*0*(\d+)[\s._-]*(?:-|_|to|~|&|\s)+E?(?:pisode)?\s*0*(\d+)\b',
+        r'(?i)\b(?:Ep|Episode|E)\s*0*(\d+)[\s._-]*(?:-|_|to|~|&|\s)+0*(\d+)\b(?:\s*(?:all|combined|episodes|480p|720p|1080p|hevc|hdrip|web-dl))?',
+        r'(?i)\b0*(\d+)[\s._-]*(?:-|_|to)[\s._-]*0*(\d+)[\s._-]*(?:all|combined|episodes)\b',
     ]
 
     detected_range = None

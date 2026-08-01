@@ -48,42 +48,36 @@ def get_readable_file_size(size_in_bytes):
 def clean_movie_title(raw_title: str) -> str:
     """
     किसी भी फाइलनेम या कैप्शन से कचरा हटाकर सिर्फ मूवी/शो का असली नाम निकालता है।
-    यह function निम्नलिखित चीज़ें हटाता है:
-      - सभी प्रकार के URLs (http://, https://, www.)
-      - Telegram usernames/channels (@username)
-      - Channel branding text (जैसे "Movies Reborn -", "@Films_Club" आदि)
-      - Square brackets में URL या username जैसे [t.me/xyz]
-      - Extra whitespace, dashes, और trailing junk
+    यह function URLs, @username, channel branding आदि हटाता है।
     """
-    # 1. Square brackets में छुपे URLs या usernames हटाएँ — जैसे [t.me/channel]
-    raw_title = re.sub(r'\[.*?(https?://|www\.|@|t\.me/).*?\]', '', raw_title)
+    # 1. Bracketed URLs or mentions e.g. [ @ClipmateZone ], [@channel], [t.me/xyz]
+    raw_title = re.sub(r'[\[\(\{]\s*(https?://|www\.|@|t\.me/)[^\]\)\}]*?[\]\)\}]', '', raw_title)
 
-    # 2. सभी HTTP/HTTPS/FTP/WWW URLs हटाएँ
+    # 2. URLs
     raw_title = re.sub(r'https?://\S+|ftp://\S+|www\.\S+', '', raw_title)
 
-    # 3. Telegram @username या @channel_name हटाएँ
-    raw_title = re.sub(r'@[A-Za-z0-9_]+', '', raw_title)
+    # 3. Telegram @username (without wiping out movie title joined with underscores)
+    raw_title = re.sub(r'@[A-Za-z0-9]+(?=[_\s\.\-\[\(\]]|$)', '', raw_title)
 
-    # 4. जानी-मानी channel branding patterns हटाएँ (case-insensitive)
-    #    जैसे: "Movies Reborn -", "FilmsClub -", "CineZone |" आदि
+    # 4. Underscores ko spaces me badlein
+    raw_title = raw_title.replace('_', ' ')
+
+    # 5. Channel branding text
     raw_title = re.sub(
-        r'(?i)(movies?\s*reborn|films?\s*club|cine\s*zone|movie\s*flix|filmyzilla|moviesflix|bolly4u|khatrimaza|filmywap|dvdplay|katmovie)\s*[-:|]?\s*',
+        r'(?i)(movies?\s*reborn|films?\s*club|cine\s*zone|movie\s*flix|filmyzilla|moviesflix|bolly4u|khatrimaza|filmywap|dvdplay|katmovie|clipmate)\s*[-:|]?\s*',
         '', raw_title
     )
 
-    # 5. _@Username_ या Username_ जैसे embedded patterns (underscore style)
-    raw_title = re.sub(r'_@[A-Za-z0-9_]+_|@[A-Za-z0-9_]+_', '', raw_title)
-
-    # 6. कुछ common audio/streaming tags हटाएँ जो title को गंदा करते हैं
+    # 6. Streaming tags
     raw_title = re.sub(
-        r'(?<=[\W_])(AMZN|NF|DSNP|HMAX|ATVP|PCOK|TVDL|DDP|DD|AAC|HDTV|5\.1|2\.0|7\.1|~|\w+kbps)(?=[\W_])',
+        r'(?<=[\W_])(AMZN|NF|DSNP|HMAX|ATVP|PCOK|TVDL|DDP|DD|AAC|5\.1|2\.0|7\.1|~|\w+kbps)(?=[\W_])',
         '', raw_title, flags=re.IGNORECASE
     )
 
-    # 7. Trailing/leading dashes, pipes, और colons साफ करें
-    raw_title = re.sub(r'^[\s\-|:]+|[\s\-|:]+$', '', raw_title)
+    # 7. Leading/trailing junk
+    raw_title = re.sub(r'^[\s\-|:\[\]\(\)]+|[\s\-|:\[\]\(\)]+$', '', raw_title)
 
-    # 8. Multiple spaces को एक space में बदलें और ' .' को '.' करें
+    # 8. Clean spaces
     raw_title = re.sub(r'\s+', ' ', raw_title).strip().replace(' .', '.')
 
     return raw_title
