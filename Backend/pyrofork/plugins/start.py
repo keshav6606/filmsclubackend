@@ -108,14 +108,29 @@ async def restart(bot: Client, message: Message):
 
 
 
-async def delete_messages_after_delay(messages):
-    await asleep(300)  
+async def delete_messages_after_delay(messages, chat_id=None, reget_url=None):
+    await asleep(300)  # 5 minutes auto-delete
     for msg in messages:
         try:
             await msg.delete()
         except Exception as e:
             LOGGER.error(f"Error deleting message {msg.id}: {e}")
-        await asleep(2)  
+        await asleep(1)  
+
+    if chat_id and reget_url:
+        try:
+            await StreamBot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "🗑️ **Files deleted due to copyright protection.**\n\n"
+                    "If you still need the files, click the button below to retrieve them again:"
+                ),
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔁 Get File Again", url=reget_url)
+                ]])
+            )
+        except Exception as e:
+            LOGGER.error(f"Failed to send re-get file message: {e}")
 
 
 async def is_user_joined(bot: Client, user_id: int) -> bool:
@@ -241,11 +256,18 @@ async def start(bot: Client, message: Message):
                 await message.reply_text("Error retrieving media.")
 
         if sent_messages:
+            bot_username = (bot.me.username if bot.me and bot.me.username else Telegram.CHANNEL_USERNAME or 'Filmy4uhdbot').lstrip('@')
+            reget_url = f"https://t.me/{bot_username}?start={command_part}"
+
             warning_msg = await message.reply_text(
-                "Forward these files to your saved messages. These files will be deleted from the bot within 5 minutes."
+                "⏱️ **Forward these files to your Saved Messages.**\n\n"
+                "These files will be deleted from the bot in 5 minutes due to copyright protection.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔁 Get File Again", url=reget_url)
+                ]])
             )
             sent_messages.append(warning_msg)
-            create_task(delete_messages_after_delay(sent_messages))
+            create_task(delete_messages_after_delay(sent_messages, message.chat.id, reget_url))
     else:
         await message.reply_text(
             "Welcome to @Filmy4uhdbot! 🎬\n\n"

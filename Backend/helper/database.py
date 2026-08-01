@@ -73,6 +73,17 @@ class Database:
             LOGGER.error(f"Validation error: {e}")
             return None
 
+        # Cross-collection cleanup: if misclassified in movie_collection earlier, remove it
+        try:
+            await self.movie_collection.delete_many({
+                "$or": [
+                    {"tmdb_id": tv_show_dict["tmdb_id"]},
+                    {"title": tv_show_dict["title"], "release_year": tv_show_dict["release_year"]}
+                ]
+            })
+        except Exception as ex:
+            LOGGER.warning(f"Failed to clean misclassified movie entry: {ex}")
+
         existing_media = await self.tv_collection.find_one({
             "$or": [
                 {"tmdb_id": tv_show_dict["tmdb_id"]},
@@ -119,6 +130,8 @@ class Database:
             existing_media["updated_on"] = datetime.utcnow()
             existing_media["languages"] = tv_show_dict["languages"]
             existing_media["rip"] = tv_show_dict["rip"]
+            existing_media["keywords"] = tv_show_dict.get("keywords", [])
+            existing_media["seo_title"] = tv_show_dict.get("seo_title")
             await self.tv_collection.replace_one(
                 {"tmdb_id": tv_show_dict["tmdb_id"]}, existing_media)
             return existing_media["_id"]
@@ -135,6 +148,17 @@ class Database:
         except ValidationError as e:
             LOGGER.error(f"Validation error: {e}")
             return None
+
+        # Cross-collection cleanup: if misclassified in tv_collection earlier, remove it
+        try:
+            await self.tv_collection.delete_many({
+                "$or": [
+                    {"tmdb_id": movie_dict["tmdb_id"]},
+                    {"title": movie_dict["title"], "release_year": movie_dict["release_year"]}
+                ]
+            })
+        except Exception as ex:
+            LOGGER.warning(f"Failed to clean misclassified TV entry: {ex}")
 
         existing_media = await self.movie_collection.find_one({
             "$or": [
@@ -164,6 +188,8 @@ class Database:
             existing_media["updated_on"] = datetime.utcnow()
             existing_media["languages"] = movie_dict["languages"]
             existing_media["rip"] = movie_dict["rip"]
+            existing_media["keywords"] = movie_dict.get("keywords", [])
+            existing_media["seo_title"] = movie_dict.get("seo_title")
             await self.movie_collection.replace_one(
                 {"tmdb_id": movie_dict["tmdb_id"]}, existing_media)
             return existing_media["_id"]
@@ -202,6 +228,8 @@ class Database:
                 media_type=metadata_info['media_type'],
                 languages=metadata_info['languages'],
                 rip=metadata_info['rip'],
+                keywords=metadata_info.get('keywords', []),
+                seo_title=metadata_info.get('seo_title'),
                 telegram=[
                     QualityDetail(
                         quality=metadata_info['quality'],
@@ -227,6 +255,8 @@ class Database:
                 total_episodes=metadata_info['total_episodes'],
                 languages=metadata_info['languages'],
                 rip=metadata_info['rip'],
+                keywords=metadata_info.get('keywords', []),
+                seo_title=metadata_info.get('seo_title'),
                 seasons=[
                     Season(
                         season_number=metadata_info['season_number'],

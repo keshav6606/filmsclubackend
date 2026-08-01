@@ -95,22 +95,33 @@ clean_filename = clean_movie_title
 
 def apply_channel_branding(filename: str) -> str:
     """
-    Filename में से सभी बाहरी @username हटाता है और अपने channel का @tag prefix में जोड़ता है।
-    उदाहरण:
-      Input:  "@Latest_Movies_Reborn - Dhamaal.4.2026.1080p.mkv"
-      Output: "@Filmy4uhdbot - Dhamaal.4.2026.1080p.mkv"
-
-    अगर CHANNEL_USERNAME set नहीं है तो सिर्फ @username हटाकर clean नाम देता है।
+    Filename में मौजूद बाहरी @username को अपने channel @tag से बदलता है।
+    यह Original Bracket Style (जैसे `[ @channel ]`, `(@channel)`, `[@channel]`, `@channel -`) 
+    को ध्यान में रखकर उसी Style में replace करता है।
     """
     channel = (Telegram.CHANNEL_USERNAME or '').strip().lstrip('@')
+    if not channel:
+        return filename
 
-    # सभी बाहरी @username हटाएँ (leading/trailing dashes भी)
-    branded = re.sub(r'@[A-Za-z0-9_]+', '', filename)
-    branded = re.sub(r'^[\s\-|]+|[\s\-|]+$', '', branded).strip()
+    our_tag = f"@{channel}"
 
-    # अपना @tag prefix में जोड़ें (अगर channel set है)
-    if channel:
-        branded = f"@{channel} - {branded}"
+    # 1. Bracketed mention e.g. [ @username ], (@username), {@username}
+    branded = re.sub(r'([\[\(\{])\s*@[A-Za-z0-9_]+\s*([\]\)\}])', f'\\1 {our_tag} \\2', filename)
+
+    # 2. If it wasn't bracketed, but had direct @user
+    if our_tag not in branded:
+        branded = re.sub(r'@[A-Za-z0-9_]+', our_tag, filename)
+
+    # 3. If filename originally had no @username at all, prepend [@our_tag]
+    if our_tag not in branded:
+        branded = f"[{our_tag}] {filename}"
+
+    # Clean up excess internal spacing
+    branded = re.sub(r'\[\s+', '[ ', branded)
+    branded = re.sub(r'\s+\]', ' ]', branded)
+    branded = re.sub(r'\(\s+', '( ', branded)
+    branded = re.sub(r'\s+\)', ' )', branded)
+    branded = re.sub(r'\s+', ' ', branded).strip()
 
     return branded
 

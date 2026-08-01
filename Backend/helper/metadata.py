@@ -79,6 +79,41 @@ def extract_season_and_episode(cleaned_filename: str, parsed: dict) -> Tuple[Opt
     return season, None
 
 
+def generate_seo_metadata(title: str, year: int, genres: list, languages: list, media_type: str, quality: str = None, rip: str = None) -> Tuple[str, list]:
+    media_label = "TV Show" if media_type == "tv" else "Movie"
+    quality_label = quality or "1080p"
+    lang_str = ", ".join(languages) if languages else "Hindi"
+
+    seo_title = f"Watch {title} ({year}) Online - Download {quality_label} {media_label}"
+
+    keywords = [
+        title,
+        f"Watch {title} online",
+        f"Download {title} {year}",
+        f"{title} {quality_label}",
+        f"{title} {media_label}",
+        f"{title} {lang_str}",
+        "filmy4uhd",
+        "movies reborn",
+        media_label,
+        "Web Series" if media_type == "tv" else "Full Movie",
+        "HD Download",
+        "Free Stream"
+    ]
+
+    if genres:
+        keywords.extend(genres)
+
+    if any(k.lower() in title.lower() for k in ['drama', 'korean', 'kdrama', 'k-drama']):
+        keywords.extend(["Kdrama", "Korean Series"])
+
+    if any(k.lower() in title.lower() or 'animation' in [g.lower() for g in (genres or [])] for k in ['anime', 'naruto', 'attack', 'jujutsu', 'demon']):
+        keywords.extend(["Anime", "Anime Series"])
+
+    unique_keywords = list(dict.fromkeys(keywords))
+    return seo_title, unique_keywords
+
+
 async def metadata(filename: str, media) -> dict:
     try:
         # PTN.parse() से पहले filename साफ करें — URL, @channel, branding सब हटाएँ
@@ -106,13 +141,29 @@ async def metadata(filename: str, media) -> dict:
                 LOGGER.debug(f"Failed to extract TMDB ID from filename {filename}: {e}")
                 default_id = None
 
+        is_tv_show = False
+        tv_keywords = ['season', 'series', 'webseries', 'web series', 'episodes', 'episode', 'ep', 'kdrama', 'k-drama', 'anime', 'tvshow', 'show', 's0', 's1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9']
+        
+        if season is not None or any(kw in cleaned_filename.lower() for kw in tv_keywords):
+            is_tv_show = True
+
         if title:
-            if season and episode:
+            if is_tv_show:
+                if season is None:
+                    season = 1
+                if episode is None:
+                    episode = "Full Season"
                 LOGGER.info(f"Fetching TV metadata for: {title} S{season} Episode {episode}")
                 return await fetch_tv_metadata(title, season, episode, year, quality, default_id, languages, rip)
             else:
                 LOGGER.info(f"Fetching movie metadata for: {title} ({year})")
-                return await fetch_movie_metadata(title, year, quality, default_id, languages, rip)
+                res = await fetch_movie_metadata(title, year, quality, default_id, languages, rip)
+                if res is None:
+                    season = season or 1
+                    episode = episode or "Full Season"
+                    LOGGER.info(f"Movie fetch failed, trying TV metadata fallback for: {title}")
+                    return await fetch_tv_metadata(title, season, episode, year, quality, default_id, languages, rip)
+                return res
 
         LOGGER.info(f"No title parsed from: {filename} (parsed: {parsed})")
         return None
@@ -167,7 +218,6 @@ async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], y
                 LOGGER.warning(f"TMDb episode details fetch failed for S{season}E{fetch_ep_id}: {e}")
                 ep_details = None
         elif not ep_details:
-            # If IMDb had tv_details but failed ep_details, try TMDb for episode
             try:
                 tmdb_results = await tmdb.search().tv(query=title)
                 if tmdb_results:
@@ -224,6 +274,8 @@ async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], y
                 LOGGER.warning(f"Fallback TMDb metadata fetch failed: {e}")
                 status = 'Unknown'
 
+        seo_title, keywords = generate_seo_metadata(show_title, show_year, genres, languages or ['hi'], "tv", quality, rip)
+
         result = {
             "tmdb_id": tmdb_id,
             "title": show_title,
@@ -243,11 +295,17 @@ async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], y
             "episode_backdrop": ep_backdrop,
             "quality": quality,
             "languages": languages or ['hi'],
-            "rip": rip or 'Blu-ray'
+            "rip": rip or 'Blu-ray',
+            "keywords": keywords,
+            "seo_title": seo_title
         }
 
         LOGGER.info(f"Metadata successfully fetched for {show_title} S{season} Episode {episode}")
         return result
+
+    except Exception as e:
+        LOGGER.error(f"Error fetching TV metadata for '{title}' S{season} Episode {episode}: {e}", exc_info=True)
+        return None
 
     except Exception as e:
         LOGGER.error(f"Error fetching TV metadata for '{title}' S{season} Episode {episode}: {e}", exc_info=True)
@@ -322,6 +380,8 @@ async def fetch_movie_metadata(title: str, year=None, quality=None, default_id=N
                 backdrop = ''
                 poster = ''
 
+        seo_title, keywords = generate_seo_metadata(movie_title, movie_year, genres, languages or ['hi'], "movie", quality, rip)
+
         LOGGER.info(f"Metadata fetched successfully for '{movie_title}' ({movie_year})")
         return {
             "tmdb_id": tmdb_id,
@@ -336,7 +396,9 @@ async def fetch_movie_metadata(title: str, year=None, quality=None, default_id=N
             "runtime": runtime,
             "quality": quality,
             "languages": languages or ['hi'],
-            "rip": rip or 'Blu-ray'
+            "rip": rip or 'Blu-ray',
+            "keywords": keywords,
+            "seo_title": seo_title
         }
 
     except Exception as e:

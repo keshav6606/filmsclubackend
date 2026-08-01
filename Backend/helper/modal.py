@@ -35,6 +35,8 @@ class TVShowSchema(BaseModel):
     updated_on: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the last update")
     languages: List[str] = Field(..., description="List of languages associated with the Movie")
     rip: str = Field(..., description="Media rip of the file")
+    keywords: Optional[List[str]] = Field(default_factory=list, description="SEO Keywords and tags")
+    seo_title: Optional[str] = Field(None, description="SEO Title")
     seasons: List[Season] = Field(..., description="List of seasons in the TV show")
 
 
@@ -53,5 +55,7 @@ class MovieSchema(BaseModel):
     updated_on: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the last update")
     languages: List[str] = Field(..., description="List of languages associated with the Movie")
     rip: str = Field(..., description="Media rip of the file")
+    keywords: Optional[List[str]] = Field(default_factory=list, description="SEO Keywords and tags")
+    seo_title: Optional[str] = Field(None, description="SEO Title")
     telegram: Optional[List[QualityDetail]] = Field(None, description="List of available quality details")
     channel_message_id: Optional[int] = Field(None, description="Telegram message ID of the channel post")
