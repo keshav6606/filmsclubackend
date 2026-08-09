@@ -4,20 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="https://cdn.jsdelivr.net/gh/weebzone/weebzone/data/Surf-TG/src/ico2.png" type="image/x-icon" />
-    <title>Stream</title>
+    <title>FilmsClub Stream</title>
+    <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
     <style>
-        video {
-            display: none;
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            background-color: #0d0f12;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        #artplayer-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        .art-video-player {
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
     </style>
 </head>
 <body>
 
-    <video id="videoPlayer" controls playsinline></video>
+    <div id="artplayer-container"></div>
 
     <script>
         async function fetchJSON(url) {
             const response = await fetch(url);
+            if (!response.ok) throw new Error("Failed to load stream info");
             return response.json();
         }
 
@@ -30,24 +48,100 @@
                 ? `/api/id/${tmdbId}?season_number=${seasonId}&episode_number=${episodeId}`
                 : `/api/id/${tmdbId}`;
 
-            const data = await fetchJSON(apiUrl);
+            try {
+                const data = await fetchJSON(apiUrl);
+                if (!data.telegram || data.telegram.length === 0) {
+                    document.getElementById('artplayer-container').innerHTML = '<div style="color:white; display:flex; height:100vh; align-items:center; justify-content:center; font-size:18px;">No stream links available for this title.</div>';
+                    return;
+                }
 
-            const videoElement = document.getElementById("videoPlayer");
+                // Sort streams by quality
+                const streams = data.telegram.sort((a, b) => parseInt(b.quality || 0) - parseInt(a.quality || 0));
+                const defaultStream = streams[0];
 
-            // Choose the highest quality available
-            if (data.telegram.length > 0) {
-                const bestQuality = data.telegram.reduce((prev, curr) => 
-                    parseInt(curr.quality) > parseInt(prev.quality) ? curr : prev
-                );
+                const qualityOptions = streams.map((item, index) => ({
+                    default: index === 0,
+                    html: `${item.quality || 'HD'} (${item.size || 'Stream'})`,
+                    url: `/dl/${item.id}/${encodeURIComponent(item.name)}`
+                }));
 
-                videoElement.src = `/dl/${bestQuality.id}/${bestQuality.name}`;
-                videoElement.poster = `https://image.tmdb.org/t/p/original${data.backdrop}`;
+                const storageKey = `filmsclub_resume_${tmdbId}_${seasonId}_${episodeId}`;
+
+                const art = new Artplayer({
+                    container: '#artplayer-container',
+                    url: `/dl/${defaultStream.id}/${encodeURIComponent(defaultStream.name)}`,
+                    poster: data.backdrop ? `https://image.tmdb.org/t/p/original${data.backdrop}` : '',
+                    title: data.title || 'Stream',
+                    volume: 0.8,
+                    isLive: false,
+                    muted: false,
+                    autoplay: true,
+                    pip: true,
+                    autoSize: true,
+                    autoMini: true,
+                    screenshot: true,
+                    setting: true,
+                    loop: false,
+                    flip: true,
+                    playbackRate: true,
+                    aspectRatio: true,
+                    fullscreen: true,
+                    fullscreenWeb: true,
+                    subtitleOffset: true,
+                    miniProgressBar: true,
+                    mutex: true,
+                    backdrop: true,
+                    playsInline: true,
+                    autoPlayback: true,
+                    theme: '#e50914',
+                    quality: qualityOptions,
+                    controls: [
+                        {
+                            name: 'fast-rewind',
+                            position: 'left',
+                            html: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>',
+                            tooltip: 'Rewind 10s',
+                            click: function () {
+                                art.seek = Math.max(0, art.currentTime - 10);
+                            },
+                        },
+                        {
+                            name: 'fast-forward',
+                            position: 'left',
+                            html: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>',
+                            tooltip: 'Forward 10s',
+                            click: function () {
+                                art.seek = Math.min(art.duration, art.currentTime + 10);
+                            },
+                        },
+                    ],
+                });
+
+                // Resume watch position
+                art.on('ready', () => {
+                    const savedTime = parseFloat(localStorage.getItem(storageKey));
+                    if (savedTime && savedTime > 5 && savedTime < art.duration - 10) {
+                        art.currentTime = savedTime;
+                        art.notice.show = `Resumed watching from ${Math.floor(savedTime / 60)}m ${Math.floor(savedTime % 60)}s`;
+                    }
+                });
+
+                // Save time periodically
+                art.on('video:timeupdate', () => {
+                    if (art.currentTime > 5) {
+                        localStorage.setItem(storageKey, art.currentTime.toString());
+                    }
+                });
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('artplayer-container').innerHTML = `<div style="color:white; display:flex; height:100vh; align-items:center; justify-content:center;">Error loading video player: ${err.message}</div>`;
             }
         }
 
-        // Initialize the player on page load
-        initPlayer();
+        window.onload = initPlayer;
     </script>
 
 </body>
 </html>
+

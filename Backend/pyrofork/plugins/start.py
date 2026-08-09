@@ -288,13 +288,25 @@ async def start(bot: Client, message: Message):
                 media = file.document or file.video
                 if media:
                     file_caption = (
-                        f"{name}\n\n"
+                        f"🎬 **{name}**\n\n"
                         f"⏱️ **Forward this file to your Saved Messages.**\n"
                         f"This file will be deleted from the bot in 5 minutes due to copyright protection."
                     )
+                    server_host = Telegram.BASE_URL if Telegram.BASE_URL and Telegram.BASE_URL != "0.0.0.0" else "127.0.0.1"
+                    stream_url = f"http://{server_host}:{Telegram.PORT}/watch/{tmdb_id}"
+                    dl_url = f"http://{server_host}:{Telegram.PORT}/dl/{detail['id']}/{detail['name']}?dl=1"
+                    
+                    bot_buttons = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("▶️ Watch Online", url=stream_url),
+                            InlineKeyboardButton("📥 Fast Download", url=dl_url)
+                        ]
+                    ])
+
                     sent_msg = await message.reply_cached_media(
                         file_id=media.file_id,
-                        caption=file_caption
+                        caption=file_caption,
+                        reply_markup=bot_buttons
                     )
                     sent_messages.append(sent_msg)
                     await asleep(1)

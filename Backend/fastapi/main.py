@@ -219,20 +219,16 @@ async def search_documents_endpoint(
 
 
 @app.get('/dl/{id}/{name}')
-    
-async def stream_handler(request: Request, id: str, name: str):
+async def stream_handler(request: Request, id: str, name: str, dl: Optional[int] = Query(0)):
     decoded_data = await decode_string(id)
     if not decoded_data['msg_id'] or not decoded_data['hash']:
         raise HTTPException(status_code=400, detail="Missing id or hash")
     chat_id = f"-100{decoded_data['chat_id']}"
-    return await media_streamer(request, int(chat_id), int(decoded_data['msg_id']), decoded_data['hash'])
+    disposition_type = "attachment" if dl == 1 else "inline"
+    return await media_streamer(request, int(chat_id), int(decoded_data['msg_id']), decoded_data['hash'], disposition=disposition_type)
 
 
-
-    
-
-
-async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: str):
+async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: str, disposition: str = "inline"):
     range_header = request.headers.get("Range", 0)
     index = min(work_loads, key=work_loads.get)
     faster_client = multi_clients[index]
@@ -279,7 +275,7 @@ async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: s
 )
     mime_type = file_id.mime_type
     file_name = file_id.file_name
-    disposition = "inline"
+    disposition = disposition or "inline"
 
     if mime_type:
         if not file_name:
