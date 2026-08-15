@@ -472,10 +472,11 @@ class Database:
     async def get_quality_details(
         self,
         tmdb_id: int,
-        quality: str,
+        quality: Optional[str] = None,
         season: Optional[int] = None,
         episode: Optional[Union[int, str]] = None
-    ) -> List[Dict[str, int]]:
+    ) -> List[Dict[str, Any]]:
+        req_q = (quality or "").strip().lower()
         if season is None:
             # Movie case
             doc = await self.movie_collection.find_one(
@@ -484,11 +485,17 @@ class Database:
             )
             if not doc:
                 return []
-            return [
-                {"id": item["id"], "name": item["name"], "language": item.get("language")}
-                for item in doc.get("telegram", [])
-                if item["quality"] == quality
-            ]
+            results = []
+            for item in doc.get("telegram", []):
+                item_q = (item.get("quality") or "").strip().lower()
+                if not req_q or req_q in ["all", "any", "none"] or item_q == req_q or req_q in item_q:
+                    results.append({
+                        "id": item["id"],
+                        "name": item["name"],
+                        "language": item.get("language"),
+                        "quality": item.get("quality")
+                    })
+            return results
         else:
             # TV show case
             doc = await self.tv_collection.find_one(
@@ -500,19 +507,26 @@ class Database:
             
             results = []
             for s in doc.get("seasons", []):
-                if s["season_number"] == season:
+                if season == 0 or s.get("season_number") == season:
                     episodes = s.get("episodes", [])
                     
                     # Filter by specific episode if provided
                     if episode is not None:
-                        episodes = [ep for ep in episodes if str(ep["episode_number"]) == str(episode)]
+                        episodes = [
+                            ep for ep in episodes 
+                            if str(ep.get("episode_number", "")).strip().lower() == str(episode).strip().lower()
+                        ]
                     
                     for ep in episodes:
-                        results.extend([
-                            {"id": t["id"], "name": t["name"], "language": t.get("language")}
-                            for t in ep.get("telegram", [])
-                            if t["quality"] == quality
-                        ])
+                        for t in ep.get("telegram", []):
+                            t_q = (t.get("quality") or "").strip().lower()
+                            if not req_q or req_q in ["all", "any", "none"] or t_q == req_q or req_q in t_q:
+                                results.append({
+                                    "id": t["id"],
+                                    "name": t["name"],
+                                    "language": t.get("language"),
+                                    "quality": t.get("quality")
+                                })
             return results
 
 

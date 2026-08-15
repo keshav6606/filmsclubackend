@@ -1,7 +1,9 @@
-from asyncio import create_task, sleep as asleep
-from urllib.parse import urlparse
+import asyncio
+from asyncio import create_task, sleep as asleep, Queue, Lock
+from urllib.parse import urlparse, quote
+from traceback import format_exc
 from Backend.logger import LOGGER
-from Backend import db
+from Backend import db, now, timezone
 from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
 from Backend.helper.encrypt import decode_string
@@ -14,13 +16,15 @@ from os import path as ospath
 from pyrogram.errors import FloodWait
 from pyrogram.enums.parse_mode import ParseMode
 from themoviedb import aioTMDb
-from asyncio import Queue, create_task
 from os import execl as osexecl
 from asyncio import create_subprocess_exec, gather
 from sys import executable
 from aiofiles import open as aiopen
 from pyrogram import enums
-
+import random
+import string
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
 
 tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
 # Initialize database connection
@@ -157,25 +161,50 @@ async def is_user_joined(bot: Client, user_id: int) -> bool:
 async def start(bot: Client, message: Message):
     LOGGER.info(f"Received command: {message.text}")
     
-    command_part = message.text.split('start ')[-1]
+    command_part = message.text.split('start ', 1)[-1].strip() if 'start ' in message.text else ""
     
-    if command_part.startswith("file_"):
-        usr_cmd = command_part[len("file_"):].strip()
-        
+    # Handle variations of prefixes: "file_", "mov_", "ser_", or direct numeric id
+    if command_part.startswith("file_") or command_part.startswith("mov_") or command_part.startswith("ser_") or (command_part and command_part.isdigit()):
+        usr_cmd = command_part
+        if usr_cmd.startswith("file_"):
+            usr_cmd = usr_cmd[len("file_"):].strip()
+        if usr_cmd.startswith("mov_"):
+            usr_cmd = usr_cmd[len("mov_"):].strip()
+        elif usr_cmd.startswith("ser_"):
+            usr_cmd = usr_cmd[len("ser_"):].strip()
+
         parts = usr_cmd.split("_")
 
         requested_lang = None
-        possible_lang = parts[-1].lower()
-        if possible_lang in ['hindi', 'english', 'tamil', 'telugu', 'malayalam', 'bengali', 'kannada', 'marathi', 'punjabi', 'gujarati', 'dual', 'multi', 'all'] or possible_lang.startswith('lang-'):
-            requested_lang = possible_lang
-            parts = parts[:-1]
+        if len(parts) > 1:
+            possible_lang = parts[-1].lower()
+            if possible_lang in ['hindi', 'english', 'tamil', 'telugu', 'malayalam', 'bengali', 'kannada', 'marathi', 'punjabi', 'gujarati', 'dual', 'multi', 'all'] or possible_lang.startswith('lang-'):
+                requested_lang = possible_lang
+                parts = parts[:-1]
 
-        if len(parts) == 2:
+        season = None
+        episode = None
+        tmdb_id = None
+        quality_details = []
+
+        if len(parts) == 1:
             try:
-                tmdb_id, quality = parts
-                tmdb_id = int(tmdb_id)
-                season = None
+                tmdb_id = int(parts[0])
+                quality_details = await db.get_quality_details(tmdb_id, quality="all")
+                if not quality_details:
+                    quality_details = await db.get_quality_details(tmdb_id, quality="all", season=0)
+            except ValueError:
+                LOGGER.error(f"Error parsing single TMDB ID command: {usr_cmd}")
+                await message.reply_text("Invalid command format.")
+                return
+
+        elif len(parts) == 2:
+            try:
+                tmdb_id = int(parts[0])
+                quality = parts[1]
                 quality_details = await db.get_quality_details(tmdb_id, quality)
+                if not quality_details:
+                    quality_details = await db.get_quality_details(tmdb_id, quality, season=0)
             except ValueError:
                 LOGGER.error(f"Error parsing movie command: {usr_cmd}")
                 await message.reply_text("Invalid command format for movie.")
@@ -183,21 +212,27 @@ async def start(bot: Client, message: Message):
 
         elif len(parts) == 3:
             try:
-                tmdb_id, season, quality = parts
-                tmdb_id = int(tmdb_id)
-                season = int(season)
-                quality_details = await db.get_quality_details(tmdb_id, quality, season)
+                tmdb_id = int(parts[0])
+                if parts[1].isdigit() and parts[2].isdigit():
+                    season = int(parts[1])
+                    episode = int(parts[2])
+                    quality_details = await db.get_quality_details(tmdb_id, quality="all", season=season, episode=episode)
+                else:
+                    season = int(parts[1])
+                    quality = parts[2]
+                    quality_details = await db.get_quality_details(tmdb_id, quality, season=season)
             except ValueError:
                 LOGGER.error(f"Error parsing TV show command: {usr_cmd}")
                 await message.reply_text("Invalid command format for TV show.")
                 return
-        elif len(parts) == 4:
+
+        elif len(parts) >= 4:
             try:
-                tmdb_id, season, episode, quality = parts
-                tmdb_id = int(tmdb_id)
-                season = int(season)
-                episode = int(episode) if episode.isdigit() else episode
-                quality_details = await db.get_quality_details(tmdb_id, quality, season, episode)
+                tmdb_id = int(parts[0])
+                season = int(parts[1])
+                episode = int(parts[2]) if parts[2].isdigit() else parts[2]
+                quality = "_".join(parts[3:])
+                quality_details = await db.get_quality_details(tmdb_id, quality, season=season, episode=episode)
             except ValueError:
                 LOGGER.error(f"Error parsing TV show command: {usr_cmd}")
                 await message.reply_text("Invalid command format for TV show.")
@@ -254,7 +289,6 @@ async def start(bot: Client, message: Message):
             joined = await is_user_joined(bot, message.from_user.id)
             if not joined:
                 channel = Telegram.FORCE_JOIN_CHANNEL
-                # Channel username nikalo (invite link ya @username)
                 try:
                     chat = await bot.get_chat(channel)
                     invite = f"https://t.me/{chat.username}" if chat.username else await bot.export_chat_invite_link(channel)
@@ -276,46 +310,98 @@ async def start(bot: Client, message: Message):
                     ]])
                 )
         # --- Force Join Check End ---
+
+        # Base host configuration
+        raw_base_url = (Telegram.BASE_URL or "").strip().rstrip('/')
+        if not raw_base_url or raw_base_url in ["0.0.0.0", "127.0.0.1", "localhost"]:
+            server_host = f"http://127.0.0.1:{Telegram.PORT}"
+        elif raw_base_url.startswith("http://") or raw_base_url.startswith("https://"):
+            server_host = raw_base_url
+        else:
+            server_host = f"https://{raw_base_url}"
+
         for detail in quality_details:
-            decoded_data = await decode_string(detail['id'])
-            channel = f"-100{decoded_data['chat_id']}"
-            msg_id = decoded_data['msg_id']
-            name = detail['name']
+            try:
+                decoded_data = await decode_string(detail['id'])
+            except Exception as dec_err:
+                LOGGER.error(f"Error decoding media id {detail.get('id')}: {dec_err}")
+                continue
+
+            raw_cid = str(decoded_data.get('chat_id', '')).strip()
+            if raw_cid.startswith("-100"):
+                channel_id = int(raw_cid)
+            elif raw_cid.startswith("-"):
+                channel_id = int(f"-100{raw_cid[1:]}")
+            else:
+                channel_id = int(f"-100{raw_cid}")
+
+            msg_id = int(decoded_data['msg_id'])
+            name = detail.get('name', 'Media File')
             if "\\n" in name and name.endswith(".mkv"):
                 name = name.rsplit(".mkv", 1)[0].replace("\\n", "\n")
+
             try:
-                file = await bot.get_messages(int(channel), int(msg_id))
-                media = file.document or file.video
-                if media:
-                    file_caption = (
-                        f"🎬 **{name}**\n\n"
-                        f"⏱️ **Forward this file to your Saved Messages.**\n"
-                        f"This file will be deleted from the bot in 5 minutes due to copyright protection."
-                    )
-                    server_host = Telegram.BASE_URL if Telegram.BASE_URL and Telegram.BASE_URL != "0.0.0.0" else "127.0.0.1"
-                    stream_url = f"http://{server_host}:{Telegram.PORT}/watch/{tmdb_id}"
-                    dl_url = f"http://{server_host}:{Telegram.PORT}/dl/{detail['id']}/{detail['name']}?dl=1"
-                    
+                file = await bot.get_messages(channel_id, msg_id)
+                if not file or file.empty:
+                    LOGGER.warning(f"File message {msg_id} in channel {channel_id} is empty or deleted.")
+                    continue
+
+                media = file.document or file.video or file.audio
+                if not media:
+                    LOGGER.warning(f"No media document/video found in message {msg_id} in channel {channel_id}")
+                    continue
+
+                file_caption = (
+                    f"🎬 **{name}**\n\n"
+                    f"⏱️ **Forward this file to your Saved Messages.**\n"
+                    f"This file will be deleted from the bot in 5 minutes due to copyright protection."
+                )
+
+                # Prepare buttons safely with URL encoding
+                bot_buttons = None
+                try:
+                    encoded_name = quote(name)
+                    if season is not None and episode is not None:
+                        stream_url = f"{server_host}/watch/{tmdb_id}?season_number={season}&episode_number={episode}"
+                    elif season is not None:
+                        stream_url = f"{server_host}/watch/{tmdb_id}?season_number={season}"
+                    else:
+                        stream_url = f"{server_host}/watch/{tmdb_id}"
+
+                    dl_url = f"{server_host}/dl/{detail['id']}/{encoded_name}?dl=1"
+
                     bot_buttons = InlineKeyboardMarkup([
                         [
                             InlineKeyboardButton("▶️ Watch Online", url=stream_url),
                             InlineKeyboardButton("📥 Fast Download", url=dl_url)
                         ]
                     ])
+                except Exception as btn_err:
+                    LOGGER.warning(f"Could not create inline buttons for {name}: {btn_err}")
+                    bot_buttons = None
 
+                try:
                     sent_msg = await message.reply_cached_media(
                         file_id=media.file_id,
                         caption=file_caption,
                         reply_markup=bot_buttons
                     )
-                    sent_messages.append(sent_msg)
-                    await asleep(1)
+                except Exception as reply_err:
+                    LOGGER.warning(f"reply_cached_media failed with buttons ({reply_err}), retrying without buttons...")
+                    sent_msg = await message.reply_cached_media(
+                        file_id=media.file_id,
+                        caption=file_caption
+                    )
+
+                sent_messages.append(sent_msg)
+                await asleep(1)
+
             except FloodWait as e:
                 LOGGER.info(f"Sleeping for {e.value}s")
                 await asleep(e.value)
                 await message.reply_text(f"Got Floodwait of {e.value}s")
             except Exception as e:
-                LOGGER.error(f"Error retrieving/sending media: {e}")
+                LOGGER.error(f"Error retrieving/sending media: {e}\n{format_exc()}")
                 await message.reply_text("Error retrieving media.")
 
         if sent_messages:
@@ -582,12 +668,29 @@ async def process_file():
                 LOGGER.info("Update failed due to validation errors.")
         file_queue.task_done()
 
-for _ in range(1):
-    create_task(process_file())
+_worker_started = False
+
+def ensure_worker():
+    global _worker_started
+    if not _worker_started:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(process_file())
+            _worker_started = True
+        except RuntimeError:
+            pass
+
+try:
+    loop = asyncio.get_running_loop()
+    loop.create_task(process_file())
+    _worker_started = True
+except RuntimeError:
+    pass
 
 
 @StreamBot.on_message(filters.channel & (filters.document | filters.video))
 async def file_receive_handler(bot: Client, message: Message):
+    ensure_worker()
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
             if message.video or message.document.mime_type.startswith("video/"):
@@ -976,12 +1079,13 @@ async def request_callback_handler(bot: Client, query: CallbackQuery):
             
         # Owner ID पर रिक्वेस्ट फॉरवर्ड करें
         owner_id = Telegram.OWNER_ID
+        time_str = datetime.now(timezone).strftime('%d/%m/%y %I:%M:%S %p')
         request_text = (
             f"📢 **New Media Request Received!** 📢\n\n"
             f"🎥 **Title:** {title} ({year})\n"
             f"🆔 **TMDB ID:** `{tmdb_id}` ({media_type.upper()})\n\n"
             f"👤 **Requested By:** {user.mention} (ID: `{user.id}`)\n"
-            f"🕒 **Time:** {now.strftime('%d/%m/%y %I:%M:%S %p')}"
+            f"🕒 **Time:** {time_str}"
         )
         
         await bot.send_message(chat_id=owner_id, text=request_text)

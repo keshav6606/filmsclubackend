@@ -20,6 +20,7 @@ from Backend.helper.exceptions import InvalidHash
 from Backend.helper.custom_dl import ByteStreamer
 from fastapi.middleware.cors import CORSMiddleware
 from Backend.helper.pyro import get_readable_time
+from pyrogram.enums import ChatMemberStatus
 from Backend import StartTime, __version__, db
 
 
@@ -223,9 +224,15 @@ async def stream_handler(request: Request, id: str, name: str, dl: Optional[int]
     decoded_data = await decode_string(id)
     if not decoded_data['msg_id'] or not decoded_data['hash']:
         raise HTTPException(status_code=400, detail="Missing id or hash")
-    chat_id = f"-100{decoded_data['chat_id']}"
+    raw_cid = str(decoded_data['chat_id']).strip()
+    if raw_cid.startswith("-100"):
+        chat_id = int(raw_cid)
+    elif raw_cid.startswith("-"):
+        chat_id = int(f"-100{raw_cid[1:]}")
+    else:
+        chat_id = int(f"-100{raw_cid}")
     disposition_type = "attachment" if dl == 1 else "inline"
-    return await media_streamer(request, int(chat_id), int(decoded_data['msg_id']), decoded_data['hash'], disposition=disposition_type)
+    return await media_streamer(request, chat_id, int(decoded_data['msg_id']), decoded_data['hash'], disposition=disposition_type)
 
 
 async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: str, disposition: str = "inline"):
