@@ -647,7 +647,7 @@
                 const art = new Artplayer({
                     container: '#artplayer-container',
                     url: `/dl/${defaultStream.id}/${encodeURIComponent(defaultStream.name)}`,
-                    poster: data.backdrop ? `https://image.tmdb.org/t/p/original${data.backdrop}` : '',
+                    poster: data.backdrop ? (data.backdrop.startsWith('http') ? data.backdrop : `https://image.tmdb.org/t/p/original${data.backdrop}`) : (data.poster ? (data.poster.startsWith('http') ? data.poster : `https://image.tmdb.org/t/p/w500${data.poster}`) : ''),
                     title: displayTitle,
                     volume: 0.8,
                     isLive: false,

@@ -280,6 +280,12 @@ async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], y
                 LOGGER.warning(f"Fallback TMDb metadata fetch failed: {e}")
                 status = 'Unknown'
 
+        # Ensure TV show image fallback
+        if not poster and backdrop:
+            poster = backdrop
+        elif not backdrop and poster:
+            backdrop = poster
+
         seo_title, keywords = generate_seo_metadata(show_title, show_year, genres, languages or ['hi'], "tv", quality, rip)
 
         result = {
@@ -375,16 +381,25 @@ async def fetch_movie_metadata(title: str, year=None, quality=None, default_id=N
             rate = movie_details.get('rating', {}).get('star', 0)
             runtime = movie_details.get('runtimeSeconds', 0) // 60
             genres = movie_details.get('genre', [])
+            poster = movie_details.get('image', '')
+            backdrop = ''
             try:
-                force_tmdb_results = await tmdb.search().movies(query=movie_title, year=movie_year)
-                force_movie_id = force_tmdb_results[0].id
-                force_movie_details = await tmdb.movie(force_movie_id).details()
-                backdrop = f"https://image.tmdb.org/t/p/original{force_movie_details.backdrop_path}" if force_movie_details.backdrop_path else ''
-                poster = movie_details.get('image', '') or \
-                         (f"https://image.tmdb.org/t/p/w500{force_movie_details.poster_path}" if force_movie_details.poster_path else '')
+                force_tmdb_results = await tmdb.search().movies(query=movie_title, year=movie_year) if movie_year else await tmdb.search().movies(query=movie_title)
+                if force_tmdb_results:
+                    force_movie_id = force_tmdb_results[0].id
+                    force_movie_details = await tmdb.movie(force_movie_id).details()
+                    if force_movie_details.backdrop_path:
+                        backdrop = f"https://image.tmdb.org/t/p/original{force_movie_details.backdrop_path}"
+                    if force_movie_details.poster_path and not poster:
+                        poster = f"https://image.tmdb.org/t/p/w500{force_movie_details.poster_path}"
             except Exception as e:
-                backdrop = ''
-                poster = ''
+                LOGGER.warning(f"Fallback TMDb metadata fetch failed for '{movie_title}': {e}")
+
+        # Ensure image fallback so template / thumbnail is never blank
+        if not poster and backdrop:
+            poster = backdrop
+        elif not backdrop and poster:
+            backdrop = poster
 
         seo_title, keywords = generate_seo_metadata(movie_title, movie_year, genres, languages or ['hi'], "movie", quality, rip)
 
