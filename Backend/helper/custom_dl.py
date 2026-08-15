@@ -1,9 +1,9 @@
 import asyncio
 from pyrogram import utils, raw
-from pyrogram.errors import AuthBytesInvalid
+from pyrogram.errors import AuthBytesInvalid, FloodWait
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 from Backend.logger import LOGGER
 from Backend.helper.exceptions import FIleNotFound
 from Backend.helper.pyro import get_file_ids
@@ -27,44 +27,64 @@ class ByteStreamer:
             self.__cached_file_ids[message_id] = file_id
         return self.__cached_file_ids[message_id]
 
-    async def yield_file(self, file_id: FileId, index: int, offset: int, first_part_cut: int, last_part_cut: int, part_count: int, chunk_size: int) -> Union[str, None]: # type: ignore
+    async def yield_file(self, file_id: FileId, index: int, offset: int, first_part_cut: int, last_part_cut: int, part_count: int, chunk_size: int):
         client = self.client
         work_loads[index] += 1
-        LOGGER.debug(f"Starting to yielding file with client {index}.")
-        media_session = await self.generate_media_session(client, file_id)
-        current_part = 1
-        location = await self.get_location(file_id)
+        LOGGER.debug(f"Starting to yield file with client {index}.")
         try:
-            r = await media_session.send(raw.functions.upload.GetFile(location=location, offset=offset, limit=chunk_size))
-            if isinstance(r, raw.types.upload.File):
-                while True:
-                    chunk = r.bytes
-                    if not chunk:
-                        break
-                    elif part_count == 1:
-                        yield chunk[first_part_cut:last_part_cut]
-                    elif current_part == 1:
-                        yield chunk[first_part_cut:]
-                    elif current_part == part_count:
-                        yield chunk[:last_part_cut]
-                    else:
-                        yield chunk
+            media_session = await self.generate_media_session(client, file_id)
+            if not media_session:
+                LOGGER.error("Failed to acquire media session for file.")
+                return
 
-                    current_part += 1
-                    offset += chunk_size
+            current_part = 1
+            location = await self.get_location(file_id)
 
-                    if current_part > part_count:
+            while current_part <= part_count:
+                r = None
+                for attempt in range(5):
+                    try:
+                        r = await media_session.send(
+                            raw.functions.upload.GetFile(location=location, offset=offset, limit=chunk_size)
+                        )
                         break
-                    
-                    r = await media_session.send(
-                        raw.functions.upload.GetFile(
-                            location=location, offset=offset, limit=chunk_size
-                        ),
-                    )
-        except (TimeoutError, AttributeError):
-            pass
+                    except FloodWait as e:
+                        wait_time = e.value if hasattr(e, 'value') else 2
+                        LOGGER.warning(f"FloodWait of {wait_time}s during file streaming (offset {offset}), waiting...")
+                        await asyncio.sleep(wait_time)
+                    except (OSError, TimeoutError) as net_err:
+                        LOGGER.warning(f"Network error while fetching chunk ({net_err}), retrying {attempt+1}/5...")
+                        await asyncio.sleep(1)
+                    except Exception as exc:
+                        LOGGER.error(f"Error fetching chunk at offset {offset}: {exc}")
+                        await asyncio.sleep(1)
+
+                if not r or not isinstance(r, raw.types.upload.File):
+                    LOGGER.warning(f"Failed to fetch chunk at offset {offset} after retries.")
+                    break
+
+                chunk = r.bytes
+                if not chunk:
+                    break
+
+                if part_count == 1:
+                    yield chunk[first_part_cut:last_part_cut]
+                elif current_part == 1:
+                    yield chunk[first_part_cut:]
+                elif current_part == part_count:
+                    yield chunk[:last_part_cut]
+                else:
+                    yield chunk
+
+                current_part += 1
+                offset += chunk_size
+
+        except asyncio.CancelledError:
+            LOGGER.debug("Streaming connection cancelled by client.")
+        except Exception as e:
+            LOGGER.error(f"Streaming error in yield_file: {e}")
         finally:
-            LOGGER.debug("Finished yielding file with {current_part} parts.")
+            LOGGER.debug("Finished yielding file chunks.")
             work_loads[index] -= 1
 
     async def generate_media_session(self, client: Client, file_id: FileId) -> Session:
