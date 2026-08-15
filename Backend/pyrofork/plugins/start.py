@@ -372,7 +372,7 @@ async def start(bot: Client, message: Message):
 
                     bot_buttons = InlineKeyboardMarkup([
                         [
-                            InlineKeyboardButton("▶️ Watch Online", url=stream_url),
+                            InlineKeyboardButton("📱 Play in Next Player / Online", url=stream_url),
                             InlineKeyboardButton("📥 Fast Download", url=dl_url)
                         ]
                     ])

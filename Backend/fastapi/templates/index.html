@@ -4,24 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="icon" href="https://cdn.jsdelivr.net/gh/weebzone/weebzone/data/Surf-TG/src/ico2.png" type="image/x-icon" />
-    <title>FilmsClub Stream</title>
+    <title>FilmsClub Stream - Next Player</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <!-- ArtPlayer -->
     <script src="https://cdn.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
     <style>
         :root {
             --primary: #e50914;
-            --primary-glow: rgba(229, 9, 20, 0.35);
+            --primary-glow: rgba(229, 9, 20, 0.4);
             --next-color: #6366f1;
-            --next-glow: rgba(99, 102, 241, 0.4);
-            --vlc-color: #ff8800;
-            --bg-dark: #0a0c10;
-            --card-bg: rgba(20, 24, 33, 0.85);
+            --next-dark: #4f46e5;
+            --next-glow: rgba(99, 102, 241, 0.45);
+            --bg-dark: #080a0f;
+            --card-bg: rgba(17, 21, 30, 0.9);
             --card-border: rgba(255, 255, 255, 0.08);
-            --text-main: #f3f4f6;
+            --text-main: #f9fafb;
             --text-muted: #9ca3af;
         }
 
@@ -40,24 +40,23 @@
             overflow-x: hidden;
         }
 
-        /* App Container */
         .app-container {
             display: flex;
             flex-direction: column;
             width: 100%;
-            max-width: 1200px;
+            max-width: 1100px;
             margin: 0 auto;
             min-height: 100vh;
             padding-bottom: 40px;
         }
 
-        /* Header */
+        /* Top Navbar */
         .top-navbar {
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 14px 20px;
-            background: rgba(10, 12, 16, 0.8);
+            background: rgba(8, 10, 15, 0.85);
             backdrop-filter: blur(16px);
             border-bottom: 1px solid var(--card-border);
             position: sticky;
@@ -71,8 +70,8 @@
             gap: 10px;
             text-decoration: none;
             color: #fff;
-            font-weight: 700;
-            font-size: 1.25rem;
+            font-weight: 800;
+            font-size: 1.3rem;
             letter-spacing: -0.5px;
         }
 
@@ -86,10 +85,123 @@
             gap: 12px;
         }
 
-        .btn-header {
+        .btn-get-app {
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            text-decoration: none;
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: #fff;
+            box-shadow: 0 4px 15px var(--next-glow);
+            transition: all 0.2s ease;
+        }
+
+        .btn-get-app:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--next-glow);
+        }
+
+        /* Next Player Hero Launch Card (Primary Call to Action) */
+        .launch-hero-card {
+            margin: 20px 16px 0;
+            background: linear-gradient(135deg, rgba(30, 27, 75, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 20px;
+            padding: 24px;
+            text-align: center;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), 0 0 30px rgba(99, 102, 241, 0.15);
+            backdrop-filter: blur(20px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .launch-hero-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .launch-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             padding: 6px 14px;
-            border-radius: 8px;
+            border-radius: 20px;
+            background: rgba(99, 102, 241, 0.2);
+            color: #a5b4fc;
             font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            margin-bottom: 14px;
+        }
+
+        .launch-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 8px;
+            line-height: 1.25;
+        }
+
+        .launch-subtitle {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .main-action-buttons {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+
+        .btn-hero-launch {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 15px 32px;
+            border-radius: 14px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            text-decoration: none;
+            background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
+            color: #fff;
+            box-shadow: 0 6px 25px var(--next-glow);
+            transition: all 0.25s ease;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-hero-launch:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 10px 30px var(--next-glow);
+        }
+
+        .btn-hero-launch svg {
+            width: 26px;
+            height: 26px;
+        }
+
+        .btn-hero-store {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 15px 22px;
+            border-radius: 14px;
+            font-size: 0.95rem;
             font-weight: 600;
             text-decoration: none;
             background: rgba(255, 255, 255, 0.08);
@@ -98,8 +210,19 @@
             transition: all 0.2s ease;
         }
 
-        .btn-header:hover {
+        .btn-hero-store:hover {
             background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .auto-redirect-status {
+            font-size: 0.85rem;
+            color: #818cf8;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
         }
 
         /* Video Player Wrapper */
@@ -111,7 +234,7 @@
             overflow: hidden;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
             aspect-ratio: 16 / 9;
-            margin-top: 16px;
+            margin: 20px 0 0;
             border: 1px solid var(--card-border);
         }
 
@@ -120,42 +243,12 @@
             height: 100%;
         }
 
-        /* Player Bottom Controls & Actions */
+        /* Details Section */
         .player-details-section {
             margin-top: 20px;
             padding: 0 16px;
         }
 
-        .title-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 16px;
-        }
-
-        .media-title {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #fff;
-            letter-spacing: -0.3px;
-        }
-
-        .media-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: 6px;
-            background: rgba(229, 9, 20, 0.15);
-            color: #ff4d58;
-            font-size: 0.8rem;
-            font-weight: 600;
-            border: 1px solid rgba(229, 9, 20, 0.3);
-        }
-
-        /* External Players Quick Bar */
         .external-players-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -174,18 +267,11 @@
         }
 
         .card-title {
-            font-size: 1rem;
+            font-size: 1.05rem;
             font-weight: 600;
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-
-        .card-subtext {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin-bottom: 16px;
-            line-height: 1.4;
         }
 
         .external-buttons-grid {
@@ -207,9 +293,7 @@
             cursor: pointer;
             border: none;
             outline: none;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            overflow: hidden;
+            transition: all 0.25s ease;
         }
 
         .player-btn svg {
@@ -218,55 +302,37 @@
             flex-shrink: 0;
         }
 
-        /* Next Player Button */
-        .btn-next-player {
-            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-            color: #fff;
-            box-shadow: 0 4px 20px var(--next-glow);
-        }
-
-        .btn-next-player:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 25px var(--next-glow);
-        }
-
-        /* VLC Button */
         .btn-vlc {
             background: rgba(255, 136, 0, 0.15);
             color: #ff9900;
             border: 1px solid rgba(255, 136, 0, 0.3);
         }
-
         .btn-vlc:hover {
             background: rgba(255, 136, 0, 0.25);
             transform: translateY(-2px);
         }
 
-        /* MX Player Button */
         .btn-mx {
             background: rgba(0, 150, 255, 0.15);
             color: #38bdf8;
             border: 1px solid rgba(0, 150, 255, 0.3);
         }
-
         .btn-mx:hover {
             background: rgba(0, 150, 255, 0.25);
             transform: translateY(-2px);
         }
 
-        /* Download Button */
         .btn-download {
             background: rgba(255, 255, 255, 0.08);
             color: #fff;
             border: 1px solid var(--card-border);
         }
-
         .btn-download:hover {
             background: rgba(255, 255, 255, 0.15);
             transform: translateY(-2px);
         }
 
-        /* Episode List Section (For TV Shows) */
+        /* Episodes Section */
         .episodes-section {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -316,7 +382,7 @@
             box-shadow: 0 4px 15px var(--primary-glow);
         }
 
-        /* Loading / Error States */
+        /* Spinner / Status */
         .status-message {
             display: flex;
             flex-direction: column;
@@ -333,7 +399,7 @@
             width: 44px;
             height: 44px;
             border: 4px solid rgba(255, 255, 255, 0.1);
-            border-top-color: var(--primary);
+            border-top-color: var(--next-color);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
@@ -343,15 +409,25 @@
         }
 
         @media (max-width: 768px) {
+            .launch-hero-card {
+                padding: 18px;
+                border-radius: 16px;
+            }
+            .launch-title {
+                font-size: 1.3rem;
+            }
+            .btn-hero-launch {
+                width: 100%;
+            }
+            .btn-hero-store {
+                width: 100%;
+                justify-content: center;
+            }
             .player-wrapper {
                 border-radius: 0;
-                margin-top: 0;
             }
             .external-buttons-grid {
                 grid-template-columns: 1fr;
-            }
-            .media-title {
-                font-size: 1.25rem;
             }
         }
     </style>
@@ -365,13 +441,38 @@
                 Films<span>Club</span>
             </a>
             <div class="header-actions">
-                <a href="https://play.google.com/store/apps/details?id=com.nextplayer.pro" target="_blank" class="btn-header" style="color:#818cf8;">
+                <a href="https://play.google.com/store/apps/details?id=com.nextplayer.pro" target="_blank" class="btn-get-app">
                     ⚡ Get Next Player
                 </a>
             </div>
         </header>
 
-        <!-- Player -->
+        <!-- NEXT PLAYER HERO LAUNCH CARD (Instant One-Tap / Auto Launch) -->
+        <div class="launch-hero-card">
+            <div class="launch-badge">
+                <span>⚡ Next Player Streaming</span>
+            </div>
+            <h1 id="hero-title" class="launch-title">Loading Stream...</h1>
+            <p class="launch-subtitle">
+                Stream in full <strong>4K UHD, HDR, Multi-Audio (Hindi/English)</strong> directly in Next Player with zero buffering.
+            </p>
+            <div class="main-action-buttons">
+                <a id="btn-hero-next" href="#" class="btn-hero-launch">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    <span>Open in Next Player</span>
+                </a>
+                <a href="https://play.google.com/store/apps/details?id=com.nextplayer.pro" target="_blank" class="btn-hero-store">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3.609 1.814L13.792 12 3.61 22.186a2.03 2.03 0 0 1-.22-.387C3.14 21.2 3 20.37 3 19.347V4.653c0-1.022.14-1.853.39-2.452.062-.15.137-.282.219-.387zm1.423-.847L15.65 6.953 14.5 8.103 5.032.967zm0 22.066l9.467-7.135 1.15 1.15-10.617 5.985zm11.33-8.067l2.842-1.603a1.996 1.996 0 0 0 0-3.465L16.363 8.36 14.85 9.873l1.512 1.513z"/></svg>
+                    <span>Install Next Player Pro</span>
+                </a>
+            </div>
+            <div id="redirect-status" class="auto-redirect-status">
+                <div class="spinner" style="width:16px; height:16px; border-width:2px;"></div>
+                <span>Redirecting to Next Player automatically...</span>
+            </div>
+        </div>
+
+        <!-- Embedded Web Player Wrapper -->
         <div class="player-wrapper">
             <div id="artplayer-container">
                 <div class="status-message">
@@ -381,54 +482,34 @@
             </div>
         </div>
 
-        <!-- Details & External Player Launchers -->
+        <!-- Details & Other External Players -->
         <div class="player-details-section">
-            <div class="title-row">
-                <h1 id="title-text" class="media-title">Loading Stream...</h1>
-                <div id="media-badge-container"></div>
-            </div>
-
-            <!-- External Players Card -->
             <div class="external-players-card">
                 <div class="card-header">
                     <div class="card-title">
-                        <span>📱 Play in External Video Players</span>
+                        <span>📲 Other Player Options</span>
                     </div>
                 </div>
-                <p class="card-subtext">
-                    For the best experience with <strong>4K, HEVC / 10-bit & Dual-Audio (Hindi/English)</strong>, open directly in <strong>Next Player</strong> or VLC on your device.
-                </p>
                 <div class="external-buttons-grid">
-                    <!-- Next Player (Primary Recommended) -->
-                    <a id="btn-next-player" href="#" class="player-btn btn-next-player">
-                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                        <span>Play in Next Player</span>
-                    </a>
-
-                    <!-- VLC Player -->
                     <a id="btn-vlc" href="#" class="player-btn btn-vlc">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L3 19h18L12 2zm0 4l5.3 11H6.7L12 6z"/></svg>
                         <span>Play in VLC</span>
                     </a>
-
-                    <!-- MX Player -->
                     <a id="btn-mx" href="#" class="player-btn btn-mx">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
                         <span>Play in MX Player</span>
                     </a>
-
-                    <!-- Fast Download -->
                     <a id="btn-download" href="#" class="player-btn btn-download" download>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                        <span>Download Video</span>
+                        <span>Fast Download</span>
                     </a>
                 </div>
             </div>
 
-            <!-- Episodes Section (Loaded dynamically for TV shows) -->
+            <!-- Episodes Section (Loaded for TV Shows) -->
             <div id="episodes-container" class="episodes-section" style="display: none;">
                 <div class="card-title">
-                    <span>📺 Season Episodes</span>
+                    <span>📺 Episodes Navigator</span>
                 </div>
                 <div id="episodes-grid" class="episodes-grid"></div>
             </div>
@@ -442,10 +523,10 @@
             return response.json();
         }
 
-        function buildExternalIntents(absoluteStreamUrl, mediaTitle) {
-            const encodedTitle = encodeURIComponent(mediaTitle || 'FilmsClub Video');
+        function triggerNextPlayerIntent(absoluteStreamUrl, mediaTitle) {
+            const encodedTitle = encodeURIComponent(mediaTitle || 'FilmsClub Stream');
             
-            // Next Player Pro Android Intent (package: com.nextplayer.pro, fallback to app)
+            // Next Player Android Intent URL
             const nextPlayerIntent = `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.nextplayer.pro;S.title=${encodedTitle};end`;
             
             // VLC Android Intent
@@ -454,23 +535,30 @@
             // MX Player Android Intent
             const mxIntent = `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;S.title=${encodedTitle};end`;
 
-            const btnNext = document.getElementById('btn-next-player');
-            const btnVlc = document.getElementById('btn-vlc');
-            const btnMx = document.getElementById('btn-mx');
-            const btnDl = document.getElementById('btn-download');
+            const heroNextBtn = document.getElementById('btn-hero-next');
+            const vlcBtn = document.getElementById('btn-vlc');
+            const mxBtn = document.getElementById('btn-mx');
+            const dlBtn = document.getElementById('btn-download');
 
-            if (btnNext) {
-                btnNext.href = nextPlayerIntent;
-                btnNext.onclick = function() {
-                    // Fallback timer if Next Player is not installed
-                    setTimeout(() => {
-                        window.location.href = "https://play.google.com/store/apps/details?id=com.nextplayer.pro";
-                    }, 2000);
-                };
+            if (heroNextBtn) {
+                heroNextBtn.href = nextPlayerIntent;
             }
-            if (btnVlc) btnVlc.href = vlcIntent;
-            if (btnMx) btnMx.href = mxIntent;
-            if (btnDl) btnDl.href = `${absoluteStreamUrl}?dl=1`;
+            if (vlcBtn) vlcBtn.href = vlcIntent;
+            if (mxBtn) mxBtn.href = mxIntent;
+            if (dlBtn) dlBtn.href = `${absoluteStreamUrl}?dl=1`;
+
+            // Auto redirect on mobile devices
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            if (isAndroid) {
+                try {
+                    window.location.href = nextPlayerIntent;
+                    document.getElementById('redirect-status').innerHTML = `<span>Launched in Next Player! If not opened, tap the button above.</span>`;
+                } catch (e) {
+                    console.log("Auto intent error", e);
+                }
+            } else {
+                document.getElementById('redirect-status').innerHTML = `<span>Tip: Open on Android to launch directly in Next Player app.</span>`;
+            }
         }
 
         async function initPlayer() {
@@ -493,15 +581,12 @@
                 let streams = [];
                 let displayTitle = data.title || "Stream";
 
-                // Handle TV Shows vs Movies
                 if (data.type === "tv" && data.seasons) {
-                    // Root TV doc returned
                     const targetSeason = isSeasonSet 
                         ? data.seasons.find(s => String(s.season_number) === String(seasonId)) || data.seasons[0] 
                         : data.seasons[0];
 
                     if (targetSeason && targetSeason.episodes && targetSeason.episodes.length > 0) {
-                        // Render episodes list
                         const epContainer = document.getElementById('episodes-container');
                         const epGrid = document.getElementById('episodes-grid');
                         epContainer.style.display = 'block';
@@ -534,17 +619,17 @@
                     document.getElementById('artplayer-container').innerHTML = `
                         <div class="status-message">
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e50914" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                            <h3>No stream links available for this title.</h3>
-                            <p>Please check back later or request via Telegram bot.</p>
+                            <h3>No stream links found for this title.</h3>
                         </div>
                     `;
+                    document.getElementById('hero-title').innerText = "No Streams Available";
+                    document.getElementById('redirect-status').style.display = 'none';
                     return;
                 }
 
-                document.getElementById('title-text').innerText = displayTitle;
-                document.getElementById('media-badge-container').innerHTML = `<span class="media-badge">HD Stream Available</span>`;
+                document.getElementById('hero-title').innerText = displayTitle;
 
-                // Sort streams by quality descending
+                // Sort streams by quality
                 streams.sort((a, b) => parseInt(b.quality || 0) - parseInt(a.quality || 0));
                 const defaultStream = streams[0];
 
@@ -555,7 +640,7 @@
                 }));
 
                 const defaultAbsoluteUrl = `${window.location.origin}/dl/${defaultStream.id}/${encodeURIComponent(defaultStream.name)}`;
-                buildExternalIntents(defaultAbsoluteUrl, displayTitle);
+                triggerNextPlayerIntent(defaultAbsoluteUrl, displayTitle);
 
                 const storageKey = `filmsclub_resume_${tmdbId}_${seasonId}_${episodeId}`;
 
@@ -567,7 +652,7 @@
                     volume: 0.8,
                     isLive: false,
                     muted: false,
-                    autoplay: true,
+                    autoplay: false,
                     pip: true,
                     autoSize: true,
                     autoMini: true,
@@ -585,7 +670,7 @@
                     backdrop: true,
                     playsInline: true,
                     autoPlayback: true,
-                    theme: '#e50914',
+                    theme: '#6366f1',
                     quality: qualityOptions,
                     controls: [
                         {
@@ -609,15 +694,13 @@
                     ],
                 });
 
-                // Update external player intent when user changes quality
                 art.on('quality', (newQuality) => {
                     if (newQuality && newQuality.url) {
                         const newAbsolute = newQuality.url.startsWith('http') ? newQuality.url : `${window.location.origin}${newQuality.url}`;
-                        buildExternalIntents(newAbsolute, displayTitle);
+                        triggerNextPlayerIntent(newAbsolute, displayTitle);
                     }
                 });
 
-                // Auto resume
                 art.on('ready', () => {
                     const savedTime = parseFloat(localStorage.getItem(storageKey));
                     if (savedTime && savedTime > 5 && savedTime < art.duration - 10) {
@@ -638,7 +721,7 @@
                     <div class="status-message">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e50914" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                         <h3>Error loading stream info: ${err.message}</h3>
-                        <p>Try opening in Next Player directly or download the file below.</p>
+                        <p>Tap the Open in Next Player button above to play directly.</p>
                     </div>
                 `;
             }
