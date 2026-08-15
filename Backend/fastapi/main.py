@@ -302,16 +302,21 @@ async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: s
     #         file_id, index, offset, first_part_cut, last_part_cut, part_count, chunk_size
     #     ):
     #         yield chunk
-    LOGGER.info(f"{mime_type}, {file_name}, {disposition}")
+    response_headers = {
+        "Content-Type": f"{mime_type or 'video/mp4'}",
+        "Content-Disposition": f'{disposition}; filename="{file_name}"',
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+    }
+    if range_header:
+        response_headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
+        response_headers["Content-Length"] = str(req_length)
+    else:
+        response_headers["Content-Length"] = str(file_size)
+
     return StreamingResponse(
-        
         status_code=206 if range_header else 200,
         content=body,
-        headers={
-            "Content-Type": f"{mime_type}",
-            "Content-Range": f"bytes {from_bytes}-{until_bytes}/{file_size}",
-            "Content-Length": str(req_length),
-            "Content-Disposition": f'{disposition}; filename="{file_name}"',
-            "Accept-Ranges": "bytes",
-        },
+        headers=response_headers,
     )
