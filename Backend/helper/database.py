@@ -291,19 +291,41 @@ class Database:
         self, 
         sort_params: List[Tuple[str, str]], 
         page: int, 
-        page_size: int
+        page_size: int,
+        genre: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> dict:
         skip = (page - 1) * page_size
         sort_criteria = [(field, ASCENDING if direction == "asc" else DESCENDING) 
                         for field, direction in sort_params]
         
-        pipeline = [
+        match_filter = {}
+        if genre and genre.strip().lower() != "all":
+            match_filter["genres"] = {"$regex": genre.strip(), "$options": "i"}
+        
+        if language and language.strip().lower() != "all":
+            lang_str = language.strip().lower()
+            if lang_str == "dual":
+                match_filter["$or"] = [
+                    {"languages": {"$regex": "dual", "$options": "i"}},
+                    {"seasons.episodes.telegram.name": {"$regex": "dual", "$options": "i"}},
+                    {"rip": {"$regex": "dual", "$options": "i"}}
+                ]
+            elif lang_str == "south":
+                match_filter["languages"] = {"$in": ["ta", "te", "ml", "kn", "Tamil", "Telugu", "Malayalam", "Kannada"]}
+            else:
+                match_filter["languages"] = {"$regex": lang_str, "$options": "i"}
+
+        pipeline = []
+        if match_filter:
+            pipeline.append({"$match": match_filter})
+        pipeline.extend([
             {"$sort": dict(sort_criteria)},
             {"$facet": {
                 "metadata": [{"$count": "total_count"}],
                 "data": [{"$skip": skip}, {"$limit": page_size}]
             }}
-        ]
+        ])
         
         result = await self.tv_collection.aggregate(pipeline).to_list(1)
         total_count = result[0]["metadata"][0]["total_count"] if result[0]["metadata"] else 0
@@ -314,19 +336,41 @@ class Database:
         self, 
         sort_params: List[Tuple[str, str]], 
         page: int, 
-        page_size: int
+        page_size: int,
+        genre: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> dict:
         skip = (page - 1) * page_size
         sort_criteria = [(field, ASCENDING if direction == "asc" else DESCENDING) 
                         for field, direction in sort_params]
         
-        pipeline = [
+        match_filter = {}
+        if genre and genre.strip().lower() != "all":
+            match_filter["genres"] = {"$regex": genre.strip(), "$options": "i"}
+        
+        if language and language.strip().lower() != "all":
+            lang_str = language.strip().lower()
+            if lang_str == "dual":
+                match_filter["$or"] = [
+                    {"languages": {"$regex": "dual", "$options": "i"}},
+                    {"telegram.name": {"$regex": "dual", "$options": "i"}},
+                    {"rip": {"$regex": "dual", "$options": "i"}}
+                ]
+            elif lang_str == "south":
+                match_filter["languages"] = {"$in": ["ta", "te", "ml", "kn", "Tamil", "Telugu", "Malayalam", "Kannada"]}
+            else:
+                match_filter["languages"] = {"$regex": lang_str, "$options": "i"}
+
+        pipeline = []
+        if match_filter:
+            pipeline.append({"$match": match_filter})
+        pipeline.extend([
             {"$sort": dict(sort_criteria)},
             {"$facet": {
                 "metadata": [{"$count": "total_count"}],
                 "data": [{"$skip": skip}, {"$limit": page_size}]
             }}
-        ]
+        ])
         
         result = await self.movie_collection.aggregate(pipeline).to_list(1)
         total_count = result[0]["metadata"][0]["total_count"] if result[0]["metadata"] else 0
@@ -384,24 +428,33 @@ class Database:
         tv_pipeline = [
             {"$match": {"$or": [
                 {"title": regex_query},
+                {"genres": regex_query},
+                {"languages": regex_query},
+                {"keywords": regex_query},
+                {"description": regex_query},
                 {"seasons.episodes.telegram.name": regex_query}
             ]}},
             {"$project": {
                 "_id": 1, "tmdb_id": 1, "title": 1, "genres": 1, "rating": 1,
                 "release_year": 1, "poster": 1, "backdrop": 1, "description": 1,
-                "total_seasons": 1, "total_episodes": 1, "media_type": 1
+                "total_seasons": 1, "total_episodes": 1, "media_type": 1,
+                "languages": 1, "rip": 1
             }}
         ]
         
         movie_pipeline = [
             {"$match": {"$or": [
                 {"title": regex_query},
+                {"genres": regex_query},
+                {"languages": regex_query},
+                {"keywords": regex_query},
+                {"description": regex_query},
                 {"telegram.name": regex_query}
             ]}},
             {"$project": {
                 "_id": 1, "tmdb_id": 1, "title": 1, "genres": 1, "rating": 1,
                 "release_year": 1, "poster": 1, "backdrop": 1, "description": 1,
-                "media_type": 1
+                "media_type": 1, "languages": 1, "rip": 1
             }}
         ]
         

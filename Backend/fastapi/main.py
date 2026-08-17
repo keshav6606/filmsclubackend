@@ -108,11 +108,13 @@ async def watch(
 async def get_sorted_tv_shows(
     sort_by: List[str] = Query(default=["rating:desc"], description="List of fields to sort by. Format: field:direction"),
     page: int = Query(default=1, ge=1, description="Page number to return"),
-    page_size: int = Query(default=10, ge=1, description="Number of TV shows per page")
+    page_size: int = Query(default=10, ge=1, description="Number of TV shows per page"),
+    genre: Optional[str] = Query(default=None, description="Filter by genre"),
+    language: Optional[str] = Query(default=None, description="Filter by language")
 ):
     try:
         sort_params = [tuple(param.split(":")) for param in sort_by]
-        sorted_tv_shows = await db.sort_tv_shows(sort_params, page, page_size)
+        sorted_tv_shows = await db.sort_tv_shows(sort_params, page, page_size, genre=genre, language=language)
         return sorted_tv_shows
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -121,11 +123,13 @@ async def get_sorted_tv_shows(
 async def get_sorted_movies(
     sort_by: List[str] = Query(default=["rating:desc"], description="List of fields to sort by. Format: field:direction"),
     page: int = Query(default=1, ge=1, description="Page number to return"),
-    page_size: int = Query(default=10, ge=1, description="Number of movies per page")
+    page_size: int = Query(default=10, ge=1, description="Number of movies per page"),
+    genre: Optional[str] = Query(default=None, description="Filter by genre"),
+    language: Optional[str] = Query(default=None, description="Filter by language")
 ):
     try:
         sort_params = [tuple(param.split(":")) for param in sort_by]
-        sorted_movies = await db.sort_movies(sort_params, page, page_size)
+        sorted_movies = await db.sort_movies(sort_params, page, page_size, genre=genre, language=language)
         return sorted_movies
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
