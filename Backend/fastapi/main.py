@@ -1,5 +1,6 @@
 from time import time
 from typing import Any, Dict, List, Optional, Union
+import aiohttp
 from Backend.helper.encrypt import decode_string
 from fastapi import FastAPI, Query, Request, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -134,16 +135,54 @@ async def get_sorted_movies(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-#Homepage:------
-# hero = http://localhost:8000/api/tvshows?sort_by=rating:desc&sort_by=release_year:desc&page=1&page_size=10
-# latest movies = http://localhost:8000/api/movies?sort_by=updated_on:desc&page=1&page_size=20
-# latest tvshows = http://localhost:8000/api/tvshows?sort_by=updated_on:desc&page=1&page_size=20
+_trailer_cache = {}
 
-#Movies:----------
-# latest movies = http://localhost:8000/api/movies?sort_by=updated_on:desc&page=1&page_size=40
+@app.get("/api/trailer/{media_type}/{tmdb_id}")
+async def get_media_trailer(media_type: str, tmdb_id: int):
+    """
+    Fetch official YouTube trailer key for a movie or TV show from TMDb.
+    """
+    cache_key = f"{media_type}:{tmdb_id}"
+    if cache_key in _trailer_cache:
+        return _trailer_cache[cache_key]
 
-#Tvshow:----------
-# latest tvshows = http://localhost:8000/api/tvshows?sort_by=updated_on:desc&page=1&page_size=40
+    tmdb_type = "tv" if media_type.lower() in ("tv", "tvshow", "series") else "movie"
+    url = f"https://api.themoviedb.org/3/{tmdb_type}/{tmdb_id}/videos?api_key={Telegram.TMDB_API}"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = data.get("results", [])
+                    trailer = None
+                    for v in results:
+                        if v.get("site") == "YouTube" and v.get("type") == "Trailer":
+                            trailer = v
+                            break
+                    if not trailer:
+                        for v in results:
+                            if v.get("site") == "YouTube" and v.get("type") in ("Teaser", "Clip"):
+                                trailer = v
+                                break
+                    if not trailer and results:
+                        for v in results:
+                            if v.get("site") == "YouTube":
+                                trailer = v
+                                break
+
+                    if trailer and "key" in trailer:
+                        res_data = {
+                            "key": trailer["key"],
+                            "name": trailer.get("name", "Official Trailer"),
+                            "site": trailer.get("site", "YouTube"),
+                        }
+                        _trailer_cache[cache_key] = res_data
+                        return res_data
+    except Exception as e:
+        LOGGER.warning(f"Error fetching trailer for {media_type}/{tmdb_id}: {e}")
+
+    raise HTTPException(status_code=404, detail="Trailer not found")
 
 
 
