@@ -1023,8 +1023,7 @@ async def bot_search_handler(bot: Client, message: Message):
             )
             
             buttons.append([
-                InlineKeyboardButton(f"🌐 Link {index}", url=website_link),
-                InlineKeyboardButton(f"🙋‍♂️ Request Upload {index}", callback_data=f"req_{media_type}_{tmdb_id}")
+                InlineKeyboardButton(f"🌐 View on Web {index}", url=website_link)
             ])
             
         # Send TMDb consolidated result
@@ -1052,65 +1051,4 @@ async def bot_search_handler(bot: Client, message: Message):
         LOGGER.error(f"Error in bot search handler: {e}")
         await message.reply_text("❌ An error occurred while searching. Please try again later.")
 
-
-@StreamBot.on_callback_query(filters.regex(r"^req_"))
-async def request_callback_handler(bot: Client, query: CallbackQuery):
-    """
-    जब कोई यूजर '🙋‍♂️ Request Upload' पर क्लिक करता है,
-    तो यह बोट ओनर (Telegram.OWNER_ID) को सीधे टेलीग्राम पर अनुरोध भेजता है।
-    """
-    user = query.from_user
-    data_parts = query.data.split("_")
-    if len(data_parts) != 3:
-        return await query.answer("Invalid request data.", show_alert=True)
-        
-    media_type = data_parts[1]
-    tmdb_id = int(data_parts[2])
-    
-    try:
-        if media_type == "movie":
-            details = await tmdb.movie(tmdb_id).details()
-            title = details.title
-            year = details.release_date.year if details.release_date else 0
-        else:
-            details = await tmdb.tv(tmdb_id).details()
-            title = details.name
-            year = details.first_air_date.year if details.first_air_date else 0
-            
-        # Owner ID पर रिक्वेस्ट फॉरवर्ड करें
-        owner_id = Telegram.OWNER_ID
-        time_str = datetime.now(timezone).strftime('%d/%m/%y %I:%M:%S %p')
-        request_text = (
-            f"📢 **New Media Request Received!** 📢\n\n"
-            f"🎥 **Title:** {title} ({year})\n"
-            f"🆔 **TMDB ID:** `{tmdb_id}` ({media_type.upper()})\n\n"
-            f"👤 **Requested By:** {user.mention} (ID: `{user.id}`)\n"
-            f"🕒 **Time:** {time_str}"
-        )
-        
-        await bot.send_message(chat_id=owner_id, text=request_text)
-        
-        # User को अलर्ट दिखाएं
-        await query.answer(f"✅ Your request for '{title} ({year})' has been sent to the Admin!", show_alert=True)
-        
-        # बटन को 'Requested' में अपडेट कर दें
-        # मूल बटन्स में से केवल क्लिक किए गए बटन को बदलें
-        new_buttons = []
-        for row in query.message.reply_markup.inline_keyboard:
-            new_row = []
-            for btn in row:
-                if btn.callback_data == query.data:
-                    new_row.append(InlineKeyboardButton("✅ Requested", callback_data="none"))
-                else:
-                    new_row.append(btn)
-            new_buttons.append(new_row)
-            
-        try:
-            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(new_buttons))
-        except Exception:
-            pass
-            
-    except Exception as e:
-        LOGGER.error(f"Error in request callback handler: {e}")
-        await query.answer("❌ Failed to send request. Please try again later.", show_alert=True)
         
