@@ -263,6 +263,7 @@ async def search_documents_endpoint(
 
 
 @app.get('/dl/{id}/{name}')
+@app.get('/api/stream/{id}/{name}')
 async def stream_handler(request: Request, id: str, name: str, dl: Optional[int] = Query(0)):
     decoded_data = await decode_string(id)
     if not decoded_data['msg_id'] or not decoded_data['hash']:
