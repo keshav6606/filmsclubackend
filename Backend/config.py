@@ -10,9 +10,10 @@ class Telegram:
     API_HASH = getenv("API_HASH", "2061c55207cfee4f106ff0dc331fe3d9")
     BOT_TOKEN = getenv("BOT_TOKEN", "8063822502:AAErn_csLBm3WDjz9WxJ1rQ2nknB266Kc5I")
     PORT = int(getenv("PORT", "8080"))
-    _auth_channels_raw = getenv("AUTH_CHANNEL", "-1002817803749, -1002740721681") or ""
+    BASE_URL = getenv("BASE_URL", "https://screeching-cherye-filmy4uhd-b60bef55.koyeb.app").rstrip('/')
+    _auth_channels_raw = getenv("AUTH_CHANNEL", "-1002903580895, -1002817803749, -1002740721681") or ""
     AUTH_CHANNEL = [channel.strip() for channel in _auth_channels_raw.split(",") if channel.strip()]
-    for _def_auth in ["-1002817803749", "-1002740721681"]:
+    for _def_auth in ["-1002903580895", "-1002817803749", "-1002740721681"]:
         if _def_auth not in AUTH_CHANNEL:
             AUTH_CHANNEL.append(_def_auth)
 

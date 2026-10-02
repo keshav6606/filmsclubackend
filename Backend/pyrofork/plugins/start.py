@@ -987,8 +987,53 @@ async def index_single_message(bot: Client, message: Message, send_notification:
         return bool(updated_id)
 
 
-async def scan_and_index_channel(bot: Client, channel_id: int, start_msg_id: int = 0, progress_msg: Optional[Message] = None):
-    """Scans all messages from channel_id and indexes them into the database."""
+async def get_channel_latest_id(bot: Client, channel_id: int) -> int:
+    """Finds the highest message ID in a channel using dummy probe or binary search."""
+    # Method 1: Send and delete dummy message (fastest and 100% accurate)
+    try:
+        dummy = await bot.send_message(channel_id, ".", disable_notification=True)
+        lid = dummy.id
+        await dummy.delete()
+        if lid > 0:
+            return lid
+    except Exception:
+        pass
+
+    # Method 2: Check MongoDB channel_tracker
+    base_id = 0
+    if db.db is not None:
+        try:
+            doc = await db.db["channel_tracker"].find_one({"channel_id": channel_id})
+            if doc and doc.get("last_msg_id"):
+                base_id = doc.get("last_msg_id")
+        except Exception:
+            pass
+
+    # Method 3: Probe ahead using get_messages
+    probe_id = max(base_id, 100)
+    for step in [probe_id + 100, probe_id + 500, probe_id + 2000, probe_id + 10000, probe_id + 50000]:
+        try:
+            m = await bot.get_messages(channel_id, step)
+            if m and not getattr(m, "empty", False):
+                base_id = step
+            else:
+                break
+        except Exception:
+            break
+
+    return max(base_id, 500)
+
+
+async def scan_and_index_channel(
+    bot: Client, 
+    channel_id: int, 
+    start_msg_id: int = 0, 
+    progress_msg: Optional[Message] = None,
+    is_catchup: bool = False
+):
+    """
+    Scans messages from channel_id in batches of 100 using get_messages (Bot-compatible, no BOT_METHOD_INVALID).
+    """
     global indexing_state
     indexing_state["is_running"] = True
     indexing_state["current_channel"] = channel_id
@@ -1000,70 +1045,124 @@ async def scan_and_index_channel(bot: Client, channel_id: int, start_msg_id: int
     try:
         chat = await bot.get_chat(channel_id)
         chat_title = chat.title or str(channel_id)
-    except Exception:
+    except Exception as e:
         chat_title = str(channel_id)
-
-    LOGGER.info(f"Starting channel indexing for '{chat_title}' ({channel_id}) from msg_id {start_msg_id}...")
-
-    last_processed_id = start_msg_id
-    from time import time
-    last_edit_time = time()
-    total_processed = 0
-
-    try:
-        async for msg in bot.get_chat_history(channel_id):
-            if indexing_state["cancel_requested"]:
-                LOGGER.info("Indexing cancelled by user request.")
-                break
-
-            if start_msg_id > 0 and msg.id <= start_msg_id:
-                break
-
-            if msg.video or (msg.document and msg.document.mime_type and msg.document.mime_type.startswith("video/")):
-                indexing_state["total_found"] += 1
-                try:
-                    success = await index_single_message(bot, msg, send_notification=False)
-                    if success:
-                        indexing_state["indexed"] += 1
-                    else:
-                        indexing_state["skipped"] += 1
-                except Exception as ex:
-                    LOGGER.error(f"Error indexing message {msg.id}: {ex}")
-                    indexing_state["skipped"] += 1
-
-            total_processed += 1
-            if msg.id > last_processed_id:
-                last_processed_id = msg.id
-
-            if progress_msg and (time() - last_edit_time > 4):
-                last_edit_time = time()
+        LOGGER.warning(f"Failed to access chat {channel_id}: {e}")
+        if "CHANNEL_INVALID" in str(e).upper() or "CHAT_ADMIN_REQUIRED" in str(e).upper():
+            if progress_msg:
                 try:
                     await progress_msg.edit_text(
-                        f"🔄 **Indexing in Progress...**\n\n"
-                        f"📢 **Channel:** `{chat_title}`\n"
-                        f"📥 **Scanned Messages:** {total_processed}\n"
-                        f"🎬 **Media Found:** {indexing_state['total_found']}\n"
-                        f"✅ **Added / Updated:** {indexing_state['indexed']}\n"
-                        f"⚠️ **Skipped:** {indexing_state['skipped']}\n\n"
-                        f"🛑 *Send `/cancel_index` to stop anytime.*",
+                        f"❌ **Cannot Access Channel `{channel_id}`**\n\n"
+                        f"Telegram Error: `{e}`\n\n"
+                        f"👉 **Important:** Bot ko is channel me **Administrator** add karein aur kam se kam ek file post/forward karein!",
                         parse_mode=ParseMode.MARKDOWN
                     )
                 except Exception:
                     pass
+            indexing_state["is_running"] = False
+            return chat_title, 0, 0, 0
 
-        if db.db is not None and last_processed_id > 0:
+    LOGGER.info(f"Starting channel indexing for '{chat_title}' ({channel_id}) from msg_id {start_msg_id} (catchup={is_catchup})...")
+
+    # Determine latest message ID in channel
+    latest_id = await get_channel_latest_id(bot, channel_id)
+    if start_msg_id > latest_id and not is_catchup:
+        latest_id = start_msg_id
+
+    min_id = max(1, start_msg_id) if (is_catchup and start_msg_id > 0) else 1
+    current_end = latest_id
+    batch_size = 100
+
+    from time import time
+    last_edit_time = time()
+    total_processed = 0
+    max_id_seen = start_msg_id
+    consecutive_empty = 0
+
+    try:
+        while current_end >= min_id:
+            if indexing_state["cancel_requested"]:
+                LOGGER.info("Indexing cancelled by user request.")
+                break
+
+            start_chunk = max(min_id, current_end - batch_size + 1)
+            chunk_ids = list(range(start_chunk, current_end + 1))
+            current_end = start_chunk - 1
+
+            try:
+                messages = await bot.get_messages(channel_id, chunk_ids)
+                if not isinstance(messages, list):
+                    messages = [messages] if messages else []
+
+                has_any_content = False
+                for msg in reversed(messages):
+                    if not msg or getattr(msg, "empty", False):
+                        continue
+
+                    has_any_content = True
+                    if msg.id > max_id_seen:
+                        max_id_seen = msg.id
+
+                    is_media = bool(msg.video or (msg.document and (
+                        (msg.document.mime_type and msg.document.mime_type.startswith("video/")) or
+                        (msg.document.file_name and msg.document.file_name.lower().endswith(('.mkv', '.mp4', '.avi', '.mov', '.webm', '.ts', '.m4v')))
+                    )))
+
+                    if is_media:
+                        indexing_state["total_found"] += 1
+                        try:
+                            success = await index_single_message(bot, msg, send_notification=False)
+                            if success:
+                                indexing_state["indexed"] += 1
+                            else:
+                                indexing_state["skipped"] += 1
+                        except Exception as ex:
+                            LOGGER.error(f"Error indexing message {msg.id}: {ex}")
+                            indexing_state["skipped"] += 1
+
+                    total_processed += 1
+
+                if not has_any_content:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 10 and total_processed > 0:
+                        break
+                else:
+                    consecutive_empty = 0
+
+                if progress_msg and (time() - last_edit_time > 3.5):
+                    last_edit_time = time()
+                    try:
+                        await progress_msg.edit_text(
+                            f"🔄 **Indexing in Progress...**\n\n"
+                            f"📢 **Channel:** `{chat_title}`\n"
+                            f"📥 **Scanning IDs:** `{start_chunk} - {start_chunk + len(chunk_ids) - 1}`\n"
+                            f"🎬 **Media Found:** {indexing_state['total_found']}\n"
+                            f"✅ **Added / Updated:** {indexing_state['indexed']}\n"
+                            f"⚠️ **Skipped:** {indexing_state['skipped']}\n\n"
+                            f"🛑 *Send `/cancel_index` to stop anytime.*",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                    except Exception:
+                        pass
+
+                await asleep(0.15)
+            except FloodWait as fw:
+                LOGGER.warning(f"FloodWait of {fw.value}s encountered during channel indexing.")
+                await asleep(fw.value)
+            except Exception as e:
+                LOGGER.error(f"Error fetching chunk {chunk_ids[0]}-{chunk_ids[-1]}: {e}")
+                break
+
+        if db.db is not None and max_id_seen > 0:
             try:
                 await db.db["channel_tracker"].update_one(
                     {"channel_id": channel_id},
-                    {"$set": {"last_msg_id": last_processed_id, "updated_at": datetime.utcnow()}},
+                    {"$set": {"last_msg_id": max_id_seen, "updated_at": datetime.utcnow()}},
                     upsert=True
                 )
             except Exception as e:
                 LOGGER.error(f"Failed to update channel_tracker in DB: {e}")
 
-    except FloodWait as fw:
-        LOGGER.warning(f"FloodWait of {fw.value}s encountered during channel indexing.")
-        await asleep(fw.value)
     except Exception as e:
         LOGGER.error(f"Error in scan_and_index_channel: {e}")
     finally:
@@ -1087,7 +1186,7 @@ async def auto_index_channels():
                 doc = await db.db["channel_tracker"].find_one({"channel_id": ch_id})
                 if doc:
                     last_id = doc.get("last_msg_id", 0)
-            await scan_and_index_channel(StreamBot, ch_id, start_msg_id=last_id)
+            await scan_and_index_channel(StreamBot, ch_id, start_msg_id=last_id, is_catchup=True)
         except Exception as e:
             LOGGER.warning(f"Auto-index failed for channel {ch}: {e}")
     LOGGER.info("Auto-indexing for AUTH_CHANNELs completed.")
