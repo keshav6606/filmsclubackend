@@ -797,16 +797,25 @@ async def send_channel_notification(metadata_info):
                                 disable_web_page_preview=False
                             )
                     except Exception as e:
-                        # Markdown parsing fallback
+                        LOGGER.warning(f"Initial notification send failed in {ch_id}: {e}. Retrying with fallbacks...")
                         plain_caption = re.sub(r'[*_`~]', '', caption)
-                        if image_url:
-                            sent_msg = await StreamBot.send_photo(
-                                chat_id=ch_id,
-                                photo=image_url,
-                                caption=plain_caption,
-                                reply_markup=reply_markup
-                            )
-                        else:
+                        try:
+                            if image_url:
+                                sent_msg = await StreamBot.send_photo(
+                                    chat_id=ch_id,
+                                    photo=image_url,
+                                    caption=plain_caption,
+                                    reply_markup=reply_markup
+                                )
+                            else:
+                                sent_msg = await StreamBot.send_message(
+                                    chat_id=ch_id,
+                                    text=plain_caption,
+                                    reply_markup=reply_markup,
+                                    disable_web_page_preview=False
+                                )
+                        except Exception as e2:
+                            LOGGER.warning(f"Photo send failed ({e2}), falling back to text-only message in {ch_id}")
                             sent_msg = await StreamBot.send_message(
                                 chat_id=ch_id,
                                 text=plain_caption,
@@ -1035,7 +1044,8 @@ async def scan_and_index_channel(
     channel_id: int, 
     start_msg_id: int = 0, 
     progress_msg: Optional[Message] = None,
-    is_catchup: bool = False
+    is_catchup: bool = False,
+    send_notification: bool = False
 ):
     """
     Scans messages from channel_id in batches of 100 using get_messages (Bot-compatible, no BOT_METHOD_INVALID).
@@ -1091,8 +1101,10 @@ async def scan_and_index_channel(
             indexing_state["is_running"] = False
             return chat_title, 0, 0, 0
         min_id = start_msg_id + 1
+        should_notify = True
     else:
         min_id = 1
+        should_notify = send_notification
 
     current_end = latest_id
     batch_size = 100
@@ -1135,9 +1147,11 @@ async def scan_and_index_channel(
                     if is_media:
                         indexing_state["total_found"] += 1
                         try:
-                            success = await index_single_message(bot, msg, send_notification=False)
+                            success = await index_single_message(bot, msg, send_notification=should_notify)
                             if success:
                                 indexing_state["indexed"] += 1
+                                if should_notify:
+                                    await asleep(1.5)
                             else:
                                 indexing_state["skipped"] += 1
                         except Exception as ex:
@@ -1214,7 +1228,13 @@ async def auto_index_channels():
                 doc = await db.db["channel_tracker"].find_one({"channel_id": ch_id})
                 if doc:
                     last_id = doc.get("last_msg_id", 0)
-            await scan_and_index_channel(StreamBot, ch_id, start_msg_id=last_id, is_catchup=True)
+            await scan_and_index_channel(
+                StreamBot, 
+                ch_id, 
+                start_msg_id=last_id, 
+                is_catchup=True,
+                send_notification=Telegram.NOTIFY_ON_INDEX
+            )
         except Exception as e:
             LOGGER.warning(f"Auto-index failed for channel {ch}: {e}")
     LOGGER.info("Auto-indexing for AUTH_CHANNELs completed.")
@@ -1314,6 +1334,7 @@ async def manual_index_command(bot: Client, message: Message):
     - All configured AUTH_CHANNELs (/index or /reindex)
     """
     is_reindex = bool(message.text and message.text.split()[0].lower().endswith('reindex'))
+    notify_requested = bool(message.text and "notify" in message.text.lower())
 
     # 1. Authorization check
     if not await CustomFilters.owner_filter(bot, message):
@@ -1376,7 +1397,7 @@ async def manual_index_command(bot: Client, message: Message):
                     pass
             status_msg = await message.reply_text(f"⏳ **Starting index for channel `{target_chat_id}` from msg `{start_id}`...**", parse_mode=ParseMode.MARKDOWN)
             try:
-                title, indexed, skipped, total = await scan_and_index_channel(bot, target_chat_id, start_msg_id=start_id, progress_msg=status_msg)
+                title, indexed, skipped, total = await scan_and_index_channel(bot, target_chat_id, start_msg_id=start_id, progress_msg=status_msg, send_notification=notify_requested)
                 await status_msg.edit_text(
                     f"🎉 **Channel Indexing Completed!**\n\n"
                     f"📢 **Channel:** `{title}`\n"
@@ -1389,21 +1410,29 @@ async def manual_index_command(bot: Client, message: Message):
                 await status_msg.edit_text(f"❌ Indexing failed: {e}\n*Make sure bot is Administrator in the channel.*")
             return
 
-    # 3. Check arguments: /index or /reindex <channel_id or link>
-    args = message.text.split(None, 1)
-    if len(args) > 1:
-        target_str = args[1].strip()
-        parsed_cid, parsed_mid = await parse_channel_target(bot, target_str)
+    # 3. Check arguments: /index or /reindex <channel_id or link> [notify]
+    args = message.text.split()
+    target_arg = None
+    for a in args[1:]:
+        if a.lower() != "notify":
+            target_arg = a
+            break
+
+    if target_arg:
+        parsed_cid, parsed_mid = await parse_channel_target(bot, target_arg)
         if not parsed_cid:
             await message.reply_text(
-                f"❌ **Could not recognize channel format:** `{target_str}`\n\n"
+                f"❌ **Could not recognize channel format:** `{target_arg}`\n\n"
                 f"💡 **Valid formats you can use:**\n"
                 f"• `/index -1002740721681` (Channel ID)\n"
+                f"• `/index -1002740721681 notify` (Index & send notifications)\n"
                 f"• `/reindex -1002740721681` (Force re-index entire channel)\n"
                 f"• `/index @channelusername` (Username)\n"
                 f"• `/index https://t.me/c/2740721681/15` (Telegram link)\n"
                 f"• `/index` (Index all configured AUTH_CHANNELs)\n"
-                f"• `/reindex` (Force re-index all configured AUTH_CHANNELs)\n"
+                f"• `/index notify` (Index all AUTH_CHANNELs & send notifications)\n"
+                f"• `/notify <movie name>` (Manually send notification for a movie)\n"
+                f"• `/test_notify` (Test notification channel permissions)\n"
                 f"• Reply to any movie file with `/index`",
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -1421,7 +1450,7 @@ async def manual_index_command(bot: Client, message: Message):
 
         status_msg = await message.reply_text(f"⏳ **Connecting to channel `{parsed_cid}`...**", parse_mode=ParseMode.MARKDOWN)
         try:
-            title, indexed, skipped, total = await scan_and_index_channel(bot, parsed_cid, start_msg_id=parsed_mid, progress_msg=status_msg)
+            title, indexed, skipped, total = await scan_and_index_channel(bot, parsed_cid, start_msg_id=parsed_mid, progress_msg=status_msg, send_notification=notify_requested)
             await status_msg.edit_text(
                 f"🎉 **Channel Indexing Completed!**\n\n"
                 f"📢 **Channel:** `{title}`\n"
@@ -1434,7 +1463,7 @@ async def manual_index_command(bot: Client, message: Message):
             await status_msg.edit_text(f"❌ Indexing failed: {e}\n*Make sure bot is added as Administrator in the channel.*")
         return
 
-    # 4. No arguments & not replied: Index all AUTH_CHANNELs
+    # 4. No channel arguments & not replied: Index all AUTH_CHANNELs
     if indexing_state["is_running"]:
         await message.reply_text("⚠️ An indexing task is already running! Send `/cancel_index` to stop it.")
         return
@@ -1451,8 +1480,9 @@ async def manual_index_command(bot: Client, message: Message):
             pass
 
     action_label = "Re-Indexing (Full)" if is_reindex else "Indexing"
+    notif_label = " (with notifications)" if notify_requested else ""
     status_msg = await message.reply_text(
-        f"🔄 **Starting {action_label} for {len(Telegram.AUTH_CHANNEL)} configured AUTH_CHANNEL(s)...**\n\n"
+        f"🔄 **Starting {action_label}{notif_label} for {len(Telegram.AUTH_CHANNEL)} configured AUTH_CHANNEL(s)...**\n\n"
         f"Channels: `{', '.join(Telegram.AUTH_CHANNEL)}`\n"
         f"⏳ Please wait while bot scans files...",
         parse_mode=ParseMode.MARKDOWN
@@ -1463,7 +1493,7 @@ async def manual_index_command(bot: Client, message: Message):
     for ch in Telegram.AUTH_CHANNEL:
         try:
             ch_id = int(ch.strip())
-            title, indexed, skipped, found = await scan_and_index_channel(bot, ch_id, progress_msg=status_msg)
+            title, indexed, skipped, found = await scan_and_index_channel(bot, ch_id, progress_msg=status_msg, send_notification=notify_requested)
             total_indexed += indexed
             total_found += found
             total_skipped += skipped
@@ -1488,6 +1518,182 @@ async def cancel_index_command(bot: Client, message: Message):
         await message.reply_text("🛑 **Indexing cancellation requested. It will stop in a few seconds.**")
     else:
         await message.reply_text("ℹ️ No indexing task is currently running.")
+
+
+@StreamBot.on_message(filters.command(['test_notify', 'check_notify']))
+async def test_notify_command(bot: Client, message: Message):
+    """
+    Owner command to test whether bot can post to all configured NOTIFICATION_CHANNELS.
+    """
+    if not await CustomFilters.owner_filter(bot, message):
+        return await message.reply_text("⛔ Access Denied.")
+
+    target_channels = []
+    for ch in Telegram.NOTIFICATION_CHANNELS:
+        try:
+            target_channels.append(int(ch.strip()))
+        except (ValueError, TypeError):
+            continue
+
+    if not target_channels:
+        return await message.reply_text("❌ No NOTIFICATION_CHANNELS configured in config.py!")
+
+    status_msg = await message.reply_text("⏳ **Testing notification channels connectivity & permissions...**", parse_mode=ParseMode.MARKDOWN)
+    report = "🔔 **Notification Channels Status Report:**\n\n"
+
+    for ch_id in target_channels:
+        try:
+            chat = await bot.get_chat(ch_id)
+            chat_title = chat.title or str(ch_id)
+            
+            # Send test message
+            test_msg = await bot.send_message(
+                chat_id=ch_id,
+                text=(
+                    "🔔 **Filmy4UHD Notification Test**\n\n"
+                    "✅ Bot is connected and has permission to post!\n"
+                    f"📢 Channel: **{chat_title}**\n"
+                    "🌐 Website: https://filmy4uhd.vercel.app"
+                ),
+                disable_notification=True
+            )
+            report += f"✅ **{chat_title}** (`{ch_id}`)\n   └ Status: Working! (Message ID: `{test_msg.id}`)\n\n"
+        except Exception as e:
+            report += f"❌ Channel `{ch_id}`\n   └ Error: `{e}`\n   └ *Bot ko Administrator add karein with 'Post Messages' permission!*\n\n"
+
+    await status_msg.edit_text(report, parse_mode=ParseMode.MARKDOWN)
+
+
+@StreamBot.on_message(filters.command(['notify']))
+async def manual_notify_command(bot: Client, message: Message):
+    """
+    Owner command to manually send decorated notification for:
+    - Replied file
+    - Specific movie title: /notify Stree 2
+    - Specific TMDB ID: /notify 933260
+    """
+    if not await CustomFilters.owner_filter(bot, message):
+        return await message.reply_text("⛔ Access Denied.")
+
+    # 1. If replied to a media file
+    if message.reply_to_message:
+        rep = message.reply_to_message
+        if rep.video or (rep.document and rep.document.mime_type and rep.document.mime_type.startswith("video/")):
+            status_msg = await message.reply_text("⏳ **Indexing & sending notification card...**", parse_mode=ParseMode.MARKDOWN)
+            success = await index_single_message(bot, rep, send_notification=True)
+            if success:
+                return await status_msg.edit_text("🎉 **Notification card sent successfully to all notification channels!**")
+            else:
+                return await status_msg.edit_text("❌ Failed to parse media or fetch metadata.")
+
+    # 2. Argument: /notify <movie name> or /notify <tmdb_id>
+    args = message.text.split(None, 1)
+    if len(args) < 2:
+        return await message.reply_text(
+            "💡 **Manual Notification Commands:**\n\n"
+            "• `/notify <movie name>` — Database se movie ka notification bhejega\n"
+            "  *Example:* `/notify Stree 2` ya `/notify Raayan`\n"
+            "• `/notify <tmdb_id>` — TMDB ID se notification bhejega\n"
+            "• Reply to any video file with `/notify` — Turant index karke notification bhejega\n"
+            "• `/notify_latest 5` — Latest 5 movies ka notification bhejega\n"
+            "• `/test_notify` — Test karega ki bot notification channels me post kar pa raha hai ya nahi",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    query = args[1].strip()
+    status_msg = await message.reply_text(f"🔍 Searching for `{query}` in database...", parse_mode=ParseMode.MARKDOWN)
+
+    media_doc = None
+    media_type = "movie"
+
+    # Search by TMDB ID if digits
+    if query.isdigit():
+        tmdb_id = int(query)
+        media_doc = await db.get_media_details(tmdb_id)
+        if media_doc:
+            media_type = media_doc.get("type", "movie")
+
+    if not media_doc:
+        clean_q = re.escape(query)
+        m = await db.movie_collection.find_one({"title": {"$regex": clean_q, "$options": "i"}})
+        if m:
+            media_doc = m
+            media_type = "movie"
+        else:
+            tv = await db.tv_collection.find_one({"title": {"$regex": clean_q, "$options": "i"}})
+            if tv:
+                media_doc = tv
+                media_type = "tv"
+
+    if not media_doc:
+        return await status_msg.edit_text(
+            f"❌ `{query}` database me nahi mila.\n\n"
+            f"Pehle channel me file upload karein ya `/index` run karein.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    tmdb_id = media_doc["tmdb_id"]
+    title = media_doc.get("title", query)
+    metadata_info = {
+        "tmdb_id": tmdb_id,
+        "media_type": media_type,
+        "title": title
+    }
+    if media_type == "tv" and media_doc.get("seasons"):
+        s = media_doc["seasons"][-1]
+        metadata_info["season_number"] = s.get("season_number", 1)
+        if s.get("episodes"):
+            metadata_info["episode_number"] = s["episodes"][-1].get("episode_number", 1)
+
+    await status_msg.edit_text(f"📢 **Sending notification for:** `{title}`...")
+    try:
+        await send_channel_notification(metadata_info)
+        await status_msg.edit_text(f"🎉 **Notification sent successfully for:** `{title}`!\n\n🌐 Check your notification channels.")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error sending notification: `{e}`")
+
+
+@StreamBot.on_message(filters.command(['notify_latest']))
+async def notify_latest_command(bot: Client, message: Message):
+    """
+    Owner command to send notifications for the latest N movies in DB.
+    Usage: /notify_latest 5
+    """
+    if not await CustomFilters.owner_filter(bot, message):
+        return await message.reply_text("⛔ Access Denied.")
+
+    args = message.text.split()
+    count = 5
+    if len(args) > 1 and args[1].isdigit():
+        count = min(20, max(1, int(args[1])))
+
+    status_msg = await message.reply_text(f"⏳ Fetching latest {count} movies from database...", parse_mode=ParseMode.MARKDOWN)
+
+    cursor = db.movie_collection.find().sort("updated_on", -1).limit(count)
+    movies = await cursor.to_list(length=count)
+
+    if not movies:
+        return await status_msg.edit_text("❌ Database me koi movie nahi mili.")
+
+    sent_count = 0
+    for m in movies:
+        meta = {
+            "tmdb_id": m["tmdb_id"],
+            "media_type": "movie",
+            "title": m.get("title")
+        }
+        try:
+            await send_channel_notification(meta)
+            sent_count += 1
+            await asleep(2.0)  # Rate limit safe delay
+        except Exception as e:
+            LOGGER.error(f"Failed to send notification for {m.get('title')}: {e}")
+
+    await status_msg.edit_text(
+        f"✅ **Sent {sent_count} / {len(movies)} notifications to configured channels!**\n\n"
+        f"🌐 Check your notification channels now.",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 
 @StreamBot.on_message(filters.private & (filters.document | filters.video))

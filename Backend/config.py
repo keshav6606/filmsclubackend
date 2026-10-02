@@ -31,6 +31,7 @@ class Telegram:
     MULTI_CLIENT = getenv("MULTI_CLIENT", "False").lower() == "true"
     USE_CAPTION = getenv("USE_CAPTION", "False").lower() == "true"
     USE_TMDB = getenv("USE_TMDB", "True").lower() == "true"
+    NOTIFY_ON_INDEX = getenv("NOTIFY_ON_INDEX", "False").lower() == "true"
     _owner_id_raw = str(getenv("OWNER_ID", "7045947967"))
     OWNER_IDS = []
     for _x in _owner_id_raw.split(","):
