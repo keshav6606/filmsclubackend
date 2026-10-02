@@ -1,6 +1,6 @@
 import json
 from os import getenv, path
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 from Backend import LOGGER
 
 

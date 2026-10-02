@@ -1,12 +1,12 @@
 from time import time
 from typing import Any, Dict, List, Optional, Union
-import aiohttp
+import aiohttp  # type: ignore
 from Backend.helper.encrypt import decode_string
-from fastapi import FastAPI, Query, Request, HTTPException
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi import FastAPI, Query, Request, HTTPException  # type: ignore
+from fastapi.responses import StreamingResponse, HTMLResponse  # type: ignore
 import urllib.parse
 
-from fastapi.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates  # type: ignore
 
 
 
@@ -19,9 +19,9 @@ from Backend.config import Telegram
 from Backend.pyrofork import StreamBot, work_loads, multi_clients
 from Backend.helper.exceptions import InvalidHash, FIleNotFound
 from Backend.helper.custom_dl import ByteStreamer
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from Backend.helper.pyro import get_readable_time
-from pyrogram.enums import ChatMemberStatus
+from pyrogram.enums import ChatMemberStatus  # type: ignore
 from Backend import StartTime, __version__, db
 
 
