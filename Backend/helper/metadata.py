@@ -137,6 +137,39 @@ async def metadata(filename: str, media) -> dict:
         languages = normalize_languages(parsed.get('language'), filename)
         rip = parsed.get('quality')
 
+        # Fallback 1: Regex on raw & cleaned filename if PTN resolution is missing
+        if not quality:
+            res_match = re.search(r'\b(2160p|4k|1080p|720p|480p|360p|uhd|fhd|hd)\b', f"{filename} {cleaned_filename}", re.IGNORECASE)
+            if res_match:
+                q_text = res_match.group(1).upper()
+                if q_text in ['4K', 'UHD']:
+                    quality = '4K'
+                elif q_text == 'FHD':
+                    quality = '1080p'
+                elif q_text == 'HD':
+                    quality = '720p'
+                else:
+                    quality = q_text.lower()
+
+        # Fallback 2: Video dimensions from Telegram media object (Pyrogram Video)
+        if not quality and media:
+            h = getattr(media, 'height', 0) or 0
+            w = getattr(media, 'width', 0) or 0
+            if h >= 2000 or w >= 3800:
+                quality = "4K"
+            elif h >= 1000 or w >= 1900:
+                quality = "1080p"
+            elif h >= 700 or w >= 1200:
+                quality = "720p"
+            elif h >= 450 or w >= 800:
+                quality = "480p"
+            elif h > 0:
+                quality = f"{h}p"
+
+        # Fallback 3: Default to HD
+        if not quality or str(quality).lower() in ['none', 'null', '']:
+            quality = "HD"
+
         try:
             default_id = extract_tmdb_id(Backend.USE_DEFAULT_ID)
         except Exception as e:
@@ -186,6 +219,7 @@ async def metadata(filename: str, media) -> dict:
 
 async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], year=None, quality=None, default_id=None, languages=None, rip=None) -> dict:
     try:
+        quality = quality or "HD"
         tv_details, ep_details, use_tmdb = None, None, False
         imdb_id = default_id if default_id and default_id.startswith("tt") else None
 
@@ -331,6 +365,7 @@ async def fetch_tv_metadata(title: str, season: int, episode: Union[int, str], y
 
 async def fetch_movie_metadata(title: str, year=None, quality=None, default_id=None, languages=None, rip=None) -> dict:
     try:
+        quality = quality or "HD"
         movie_details, use_tmdb = None, False
         imdb_id = default_id if default_id and default_id.startswith("tt") else None
 

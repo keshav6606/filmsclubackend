@@ -681,16 +681,22 @@ async def send_channel_notification(metadata_info):
         qualities = set()
         if media_type == "movie":
             for item in media_details.get('telegram', []):
-                qualities.add(item.get('quality', 'HD'))
+                q = item.get('quality') if isinstance(item, dict) else getattr(item, 'quality', None)
+                qualities.add(str(q).strip() if q and str(q).lower() not in ['none', 'null', ''] else 'HD')
         else:
             season_num = metadata_info.get('season_number')
             episode_num = metadata_info.get('episode_number')
             for season in media_details.get('seasons', []):
-                if season.get('season_number') == season_num:
-                    for episode in season.get('episodes', []):
-                        if str(episode.get('episode_number')) == str(episode_num):
-                            for item in episode.get('telegram', []):
-                                qualities.add(item.get('quality', 'HD'))
+                s_num = season.get('season_number') if isinstance(season, dict) else getattr(season, 'season_number', None)
+                if s_num == season_num:
+                    episodes = season.get('episodes', []) if isinstance(season, dict) else getattr(season, 'episodes', [])
+                    for episode in episodes:
+                        e_num = episode.get('episode_number') if isinstance(episode, dict) else getattr(episode, 'episode_number', None)
+                        if str(e_num) == str(episode_num):
+                            tel = episode.get('telegram', []) if isinstance(episode, dict) else getattr(episode, 'telegram', [])
+                            for item in (tel or []):
+                                q = item.get('quality') if isinstance(item, dict) else getattr(item, 'quality', None)
+                                qualities.add(str(q).strip() if q and str(q).lower() not in ['none', 'null', ''] else 'HD')
 
         qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
 
@@ -1069,7 +1075,25 @@ async def scan_and_index_channel(
     if start_msg_id > latest_id and not is_catchup:
         latest_id = start_msg_id
 
-    min_id = max(1, start_msg_id) if (is_catchup and start_msg_id > 0) else 1
+    # Check whether full initial scan was already completed
+    is_initial_completed = False
+    if db.db is not None:
+        try:
+            doc = await db.db["channel_tracker"].find_one({"channel_id": channel_id})
+            if doc and doc.get("initial_scan_completed"):
+                is_initial_completed = True
+        except Exception:
+            pass
+
+    if is_catchup and is_initial_completed and start_msg_id > 0:
+        if latest_id <= start_msg_id:
+            LOGGER.info(f"Channel '{chat_title}' is already up-to-date (latest_id={latest_id}, tracked={start_msg_id}).")
+            indexing_state["is_running"] = False
+            return chat_title, 0, 0, 0
+        min_id = start_msg_id + 1
+    else:
+        min_id = 1
+
     current_end = latest_id
     batch_size = 100
 
@@ -1153,11 +1177,15 @@ async def scan_and_index_channel(
                 LOGGER.error(f"Error fetching chunk {chunk_ids[0]}-{chunk_ids[-1]}: {e}")
                 break
 
-        if db.db is not None and max_id_seen > 0:
+        if db.db is not None and max_id_seen > 0 and not indexing_state["cancel_requested"]:
             try:
                 await db.db["channel_tracker"].update_one(
                     {"channel_id": channel_id},
-                    {"$set": {"last_msg_id": max_id_seen, "updated_at": datetime.utcnow()}},
+                    {"$set": {
+                        "last_msg_id": max_id_seen,
+                        "initial_scan_completed": True,
+                        "updated_at": datetime.utcnow()
+                    }},
                     upsert=True
                 )
             except Exception as e:
@@ -1276,15 +1304,17 @@ async def get_user_id(bot: Client, message: Message):
     await message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
-@StreamBot.on_message(filters.command(['index']))
+@StreamBot.on_message(filters.command(['index', 'reindex']))
 async def manual_index_command(bot: Client, message: Message):
     """
     Owner command to index:
     - Replied file directly into DB & send notification
     - Replied message's channel starting from that post
     - Specific channel ID, link, or @username (/index <channel/link>)
-    - All configured AUTH_CHANNELs (/index)
+    - All configured AUTH_CHANNELs (/index or /reindex)
     """
+    is_reindex = bool(message.text and message.text.split()[0].lower().endswith('reindex'))
+
     # 1. Authorization check
     if not await CustomFilters.owner_filter(bot, message):
         uid = message.from_user.id if message.from_user else (message.sender_chat.id if message.sender_chat else 0)
@@ -1339,6 +1369,11 @@ async def manual_index_command(bot: Client, message: Message):
         if rep.forward_from_chat:
             target_chat_id = rep.forward_from_chat.id
             start_id = rep.forward_from_message_id or 0
+            if is_reindex and db.db is not None:
+                try:
+                    await db.db["channel_tracker"].delete_one({"channel_id": target_chat_id})
+                except Exception:
+                    pass
             status_msg = await message.reply_text(f"⏳ **Starting index for channel `{target_chat_id}` from msg `{start_id}`...**", parse_mode=ParseMode.MARKDOWN)
             try:
                 title, indexed, skipped, total = await scan_and_index_channel(bot, target_chat_id, start_msg_id=start_id, progress_msg=status_msg)
@@ -1354,7 +1389,7 @@ async def manual_index_command(bot: Client, message: Message):
                 await status_msg.edit_text(f"❌ Indexing failed: {e}\n*Make sure bot is Administrator in the channel.*")
             return
 
-    # 3. Check arguments: /index <channel_id or link>
+    # 3. Check arguments: /index or /reindex <channel_id or link>
     args = message.text.split(None, 1)
     if len(args) > 1:
         target_str = args[1].strip()
@@ -1364,9 +1399,11 @@ async def manual_index_command(bot: Client, message: Message):
                 f"❌ **Could not recognize channel format:** `{target_str}`\n\n"
                 f"💡 **Valid formats you can use:**\n"
                 f"• `/index -1002740721681` (Channel ID)\n"
+                f"• `/reindex -1002740721681` (Force re-index entire channel)\n"
                 f"• `/index @channelusername` (Username)\n"
                 f"• `/index https://t.me/c/2740721681/15` (Telegram link)\n"
                 f"• `/index` (Index all configured AUTH_CHANNELs)\n"
+                f"• `/reindex` (Force re-index all configured AUTH_CHANNELs)\n"
                 f"• Reply to any movie file with `/index`",
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -1375,6 +1412,12 @@ async def manual_index_command(bot: Client, message: Message):
         if indexing_state["is_running"]:
             await message.reply_text("⚠️ An indexing task is already running! Send `/cancel_index` to stop it.")
             return
+
+        if is_reindex and db.db is not None:
+            try:
+                await db.db["channel_tracker"].delete_one({"channel_id": parsed_cid})
+            except Exception:
+                pass
 
         status_msg = await message.reply_text(f"⏳ **Connecting to channel `{parsed_cid}`...**", parse_mode=ParseMode.MARKDOWN)
         try:
@@ -1400,8 +1443,16 @@ async def manual_index_command(bot: Client, message: Message):
         await message.reply_text("❌ No target channel specified and `AUTH_CHANNEL` list is empty in config.")
         return
 
+    if is_reindex and db.db is not None:
+        try:
+            for ch in Telegram.AUTH_CHANNEL:
+                await db.db["channel_tracker"].delete_one({"channel_id": int(ch.strip())})
+        except Exception:
+            pass
+
+    action_label = "Re-Indexing (Full)" if is_reindex else "Indexing"
     status_msg = await message.reply_text(
-        f"🔄 **Starting Indexing for {len(Telegram.AUTH_CHANNEL)} configured AUTH_CHANNEL(s)...**\n\n"
+        f"🔄 **Starting {action_label} for {len(Telegram.AUTH_CHANNEL)} configured AUTH_CHANNEL(s)...**\n\n"
         f"Channels: `{', '.join(Telegram.AUTH_CHANNEL)}`\n"
         f"⏳ Please wait while bot scans files...",
         parse_mode=ParseMode.MARKDOWN
@@ -1719,12 +1770,16 @@ async def bot_search_handler(bot: Client, message: Message):
                     
                     if media_type == "movie":
                         for item in media_details.get('telegram', []):
-                            qualities.add(item.get('quality', 'HD'))
+                            q = item.get('quality') if isinstance(item, dict) else getattr(item, 'quality', None)
+                            qualities.add(str(q).strip() if q and str(q).lower() not in ['none', 'null', ''] else 'HD')
                     else:
                         for season in media_details.get('seasons', []):
-                            for episode in season.get('episodes', []):
-                                for item in episode.get('telegram', []):
-                                    qualities.add(item.get('quality', 'HD'))
+                            episodes = season.get('episodes', []) if isinstance(season, dict) else getattr(season, 'episodes', [])
+                            for episode in episodes:
+                                tel = episode.get('telegram', []) if isinstance(episode, dict) else getattr(episode, 'telegram', [])
+                                for item in (tel or []):
+                                    q = item.get('quality') if isinstance(item, dict) else getattr(item, 'quality', None)
+                                    qualities.add(str(q).strip() if q and str(q).lower() not in ['none', 'null', ''] else 'HD')
                 
                 qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
                 path_type = "mov" if media_type == "movie" else "ser"

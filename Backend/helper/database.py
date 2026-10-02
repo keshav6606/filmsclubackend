@@ -219,6 +219,10 @@ class Database:
         branded_name = apply_channel_branding(name)
         lang_label = ", ".join(metadata_info.get('languages', [])) if metadata_info.get('languages') else "Hindi"
 
+        # Ensure quality is always a valid non-empty string
+        raw_quality = metadata_info.get('quality')
+        quality_val = str(raw_quality).strip() if raw_quality and str(raw_quality).lower() not in ['none', 'null', ''] else "HD"
+
         if metadata_info['media_type'] == "movie":
             media = MovieSchema(
                 tmdb_id=metadata_info['tmdb_id'],
@@ -237,7 +241,7 @@ class Database:
                 seo_title=metadata_info.get('seo_title'),
                 telegram=[
                     QualityDetail(
-                        quality=metadata_info['quality'],
+                        quality=quality_val,
                         id=encoded_string,
                         name=branded_name,
                         size=size,
@@ -273,7 +277,7 @@ class Database:
                                 episode_backdrop=metadata_info['episode_backdrop'],
                                 telegram=[
                                     QualityDetail(
-                                        quality=metadata_info['quality'],
+                                        quality=quality_val,
                                         id=encoded_string,
                                         name=branded_name,
                                         size=size,
