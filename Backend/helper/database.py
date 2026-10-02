@@ -604,23 +604,34 @@ class Database:
         tmdb_id: int,
         media_type: str,
         message_id: int,
+        channel_id: Optional[Union[int, str]] = None,
         season_number: Optional[int] = None,
         episode_number: Optional[Union[int, str]] = None
     ) -> bool:
         try:
+            set_dict = {"channel_message_id": message_id}
+            if channel_id is not None:
+                ch_key = f"ch_{str(channel_id).replace('-', 'm')}"
+                set_dict[f"channel_message_ids.{ch_key}"] = message_id
+
             if media_type == "movie":
                 await self.movie_collection.update_one(
                     {"tmdb_id": tmdb_id},
-                    {"$set": {"channel_message_id": message_id}}
+                    {"$set": set_dict}
                 )
             else:
+                update_set = {f"seasons.$[s].episodes.$[e].channel_message_id": message_id}
+                if channel_id is not None:
+                    ch_key = f"ch_{str(channel_id).replace('-', 'm')}"
+                    update_set[f"seasons.$[s].episodes.$[e].channel_message_ids.{ch_key}"] = message_id
+
                 await self.tv_collection.update_one(
                     {
                         "tmdb_id": tmdb_id,
                         "seasons.season_number": season_number,
                         "seasons.episodes.episode_number": episode_number
                     },
-                    {"$set": {"seasons.$[s].episodes.$[e].channel_message_id": message_id}},
+                    {"$set": update_set},
                     array_filters=[{"s.season_number": season_number}, {"e.episode_number": episode_number}]
                 )
             return True

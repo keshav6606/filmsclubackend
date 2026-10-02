@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 
 class QualityDetail(BaseModel):
     quality: str = Field(..., description="Quality of the video (e.g., 1080p, 720p)")
@@ -15,6 +15,7 @@ class Episode(BaseModel):
     episode_backdrop: str = Field(..., description="Backdrop of Episode")
     telegram: Optional[List[QualityDetail]] = Field(None, description="List of available quality details")
     channel_message_id: Optional[int] = Field(None, description="Telegram message ID of the channel post")
+    channel_message_ids: Optional[Dict[str, int]] = Field(default_factory=dict, description="Telegram message IDs per channel")
 
 class Season(BaseModel):
     season_number: int = Field(..., description="Season number within the TV show")
@@ -60,3 +61,4 @@ class MovieSchema(BaseModel):
     seo_title: Optional[str] = Field(None, description="SEO Title")
     telegram: Optional[List[QualityDetail]] = Field(None, description="List of available quality details")
     channel_message_id: Optional[int] = Field(None, description="Telegram message ID of the channel post")
+    channel_message_ids: Optional[Dict[str, int]] = Field(default_factory=dict, description="Telegram message IDs per channel")

@@ -10,8 +10,18 @@ class Telegram:
     API_HASH = getenv("API_HASH", "2061c55207cfee4f106ff0dc331fe3d9")
     BOT_TOKEN = getenv("BOT_TOKEN", "8063822502:AAErn_csLBm3WDjz9WxJ1rQ2nknB266Kc5I")
     PORT = int(getenv("PORT", "8080"))
-    BASE_URL = getenv("BASE_URL", "0.0.0.0").rstrip('/')
-    AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
+    _auth_channels_raw = getenv("AUTH_CHANNEL", "-1002817803749, -1002740721681") or ""
+    AUTH_CHANNEL = [channel.strip() for channel in _auth_channels_raw.split(",") if channel.strip()]
+    for _def_auth in ["-1002817803749", "-1002740721681"]:
+        if _def_auth not in AUTH_CHANNEL:
+            AUTH_CHANNEL.append(_def_auth)
+
+    _notif_channels_raw = getenv("NOTIFICATION_CHANNELS", "-1002590869159, -1003074016132, -1002799537836") or ""
+    NOTIFICATION_CHANNELS = [ch.strip() for ch in _notif_channels_raw.split(",") if ch.strip()]
+    for _def_notif in ["-1002590869159", "-1003074016132", "-1002799537836"]:
+        if _def_notif not in NOTIFICATION_CHANNELS:
+            NOTIFICATION_CHANNELS.append(_def_notif)
+
     DATABASE = getenv("DATABASE", "mongodb+srv://Keshav:Keshav@cluster0.ndw3zfh.mongodb.net/?appName=Cluster0").split(", ")
     TMDB_API = getenv("TMDB_API", "f9dbeb078807efcbb1e3a72cd80881b3")
     IMDB_API = getenv("IMDB_API", "https://imdb-api-lux.wemedia360.workers.dev/").rstrip('/')

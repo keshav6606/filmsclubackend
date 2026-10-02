@@ -1,4 +1,5 @@
 import asyncio
+import re
 from asyncio import create_task, sleep as asleep, Queue, Lock
 from urllib.parse import urlparse, quote
 from traceback import format_exc
@@ -575,15 +576,50 @@ db_lock = Lock()
 notification_tasks = {}
 
 
+def get_existing_msg_id(media_details: dict, media_type: str, ch_id: int, metadata_info: dict) -> Optional[int]:
+    ch_key = f"ch_{str(ch_id).replace('-', 'm')}"
+    if media_type == "movie":
+        ids_map = media_details.get("channel_message_ids") or {}
+        if isinstance(ids_map, dict) and ch_key in ids_map:
+            return ids_map[ch_key]
+        return media_details.get("channel_message_id")
+    else:
+        season_num = metadata_info.get("season_number")
+        episode_num = metadata_info.get("episode_number")
+        for season in media_details.get("seasons", []):
+            if season.get("season_number") == season_num:
+                for episode in season.get("episodes", []):
+                    if str(episode.get("episode_number")) == str(episode_num):
+                        ids_map = episode.get("channel_message_ids") or {}
+                        if isinstance(ids_map, dict) and ch_key in ids_map:
+                            return ids_map[ch_key]
+                        return episode.get("channel_message_id")
+    return None
+
+
 async def send_channel_notification(metadata_info):
     """
-    FORCE_JOIN_CHANNEL पर नई फ़ाइल अपलोड का सुंदर नोटिफिकेशन भेजता है।
-    इसमें TMDb/IMDb डिटेल्स, इमेज, उपलब्ध क्वालिटीज़ और वेबसाइट का सही पाथ-लिंक शामिल होता है।
+    कॉन्फ़िगर किए गए सभी चैनल्स (NOTIFICATION_CHANNELS & FORCE_JOIN_CHANNEL) पर
+    नई फ़ाइल अपलोड का पूरा डेकोरेटेड नोटिफिकेशन (Review, Rating, Short Story / Synopsis) भेजता है।
     यदि पहले से ही पोस्ट मौजूद है तो उसे एडिट करता है।
     """
-    channel = Telegram.FORCE_JOIN_CHANNEL
-    if not channel:
-        LOGGER.info("No FORCE_JOIN_CHANNEL set, skipping notification.")
+    target_channels = []
+    for ch in Telegram.NOTIFICATION_CHANNELS:
+        try:
+            target_channels.append(int(ch))
+        except (ValueError, TypeError):
+            continue
+
+    if Telegram.FORCE_JOIN_CHANNEL:
+        try:
+            fj = int(Telegram.FORCE_JOIN_CHANNEL)
+            if fj not in target_channels:
+                target_channels.append(fj)
+        except (ValueError, TypeError):
+            pass
+
+    if not target_channels:
+        LOGGER.info("No notification channels configured, skipping notification.")
         return
 
     try:
@@ -596,127 +632,196 @@ async def send_channel_notification(metadata_info):
             LOGGER.warning(f"Could not fetch details for tmdb_id {tmdb_id} from database.")
             return
 
-        title = media_details.get('title', 'Unknown Title')
+        raw_title = media_details.get('title', 'Unknown Title')
+        title = re.sub(r'[*_`~]', '', raw_title).strip()
         year = media_details.get('release_year', 0)
         rating = media_details.get('rating', 0.0)
+        runtime = media_details.get('runtime', 0)
         
         genres_list = media_details.get('genres', [])
-        genres = ", ".join(genres_list) if genres_list else "N/A"
+        genres = ", ".join(re.sub(r'[*_`~]', '', g) for g in genres_list) if genres_list else "Action, Drama"
         
         languages_list = media_details.get('languages', [])
-        languages = ", ".join(languages_list) if languages_list else "Hindi"
+        languages = ", ".join(re.sub(r'[*_`~]', '', l) for l in languages_list) if languages_list else "Hindi, English"
         
-        rip = media_details.get('rip', 'Blu-ray')
+        rip = re.sub(r'[*_`~]', '', media_details.get('rip', 'WEB-DL'))
         
-        description = media_details.get('description', '')
-        if len(description) > 300:
-            description = description[:297] + "..."
+        raw_description = media_details.get('description', '') or ''
+        clean_desc = re.sub(r'[*_`~]', '', raw_description).strip()
+        if clean_desc:
+            if len(clean_desc) > 280:
+                clean_desc = clean_desc[:277].rsplit(' ', 1)[0] + "..."
+            short_story = f"_{clean_desc}_"
+        else:
+            short_story = "_Experience an exciting blend of entertainment, emotion, and thrilling action. Streaming now in high quality!_"
+
+        # Dynamic review tag based on rating
+        try:
+            rating_val = float(rating)
+        except (ValueError, TypeError):
+            rating_val = 0.0
+
+        if rating_val >= 8.5:
+            verdict = "🔥 Masterpiece • Must Watch!"
+        elif rating_val >= 7.5:
+            verdict = "🌟 Superhit • Highly Recommended"
+        elif rating_val >= 6.5:
+            verdict = "✨ Great Watch • Worth Your Time"
+        elif rating_val >= 5.0:
+            verdict = "🍿 Entertaining • Good One-Time Watch"
+        elif rating_val > 0:
+            verdict = "🎬 Casual Watch • Decent"
+        else:
+            verdict = "✨ Fresh Arrival"
+
+        rating_display = f"{rating_val:.1f}/10" if rating_val > 0 else "N/A"
 
         # सभी उपलब्ध क्वालिटीज़ (Qualities) निकालें
         qualities = set()
-        existing_msg_id = None
-
         if media_type == "movie":
-            existing_msg_id = media_details.get('channel_message_id')
             for item in media_details.get('telegram', []):
                 qualities.add(item.get('quality', 'HD'))
         else:
-            # TV show case: सिर्फ इसी सीजन और एपिसोड की क्वालिटी और message ID निकालें
             season_num = metadata_info.get('season_number')
             episode_num = metadata_info.get('episode_number')
             for season in media_details.get('seasons', []):
                 if season.get('season_number') == season_num:
                     for episode in season.get('episodes', []):
                         if str(episode.get('episode_number')) == str(episode_num):
-                            existing_msg_id = episode.get('channel_message_id')
                             for item in episode.get('telegram', []):
                                 qualities.add(item.get('quality', 'HD'))
 
         qualities_str = ", ".join(sorted(list(qualities))) if qualities else "HD"
 
-        # मीडिया टाइप के अनुसार टाइटल तैयार करें
-        if media_type == "tv" and 'season_number' in metadata_info and 'episode_number' in metadata_info:
-            ep_num_str = str(metadata_info['episode_number'])
-            ep_title = metadata_info.get('episode_title', f"Episode {ep_num_str}")
-            if '-' in ep_num_str or 'to' in ep_num_str or 'combined' in ep_num_str.lower():
-                title_str = f"🎥 **Title:** {title} - S{metadata_info['season_number']} E{ep_num_str} ({ep_title}) [{year}]"
-            else:
-                title_str = f"🎥 **Title:** {title} - S{metadata_info['season_number']}E{ep_num_str} ({ep_title}) [{year}]"
-        else:
-            title_str = f"🎥 **Title:** {title} ({year})"
-
         # Vercel फ़्रंटएंड के अनुसार पाथ-लिंक बनाएं
         path_type = "mov" if media_type == "movie" else "ser"
         website_link = f"https://filmy4uhd.vercel.app/{path_type}/{tmdb_id}"
 
-        # सुंदर कैप्शन/पोस्ट
+        # मीडिया टाइप के अनुसार टाइटल और हेडर तैयार करें
+        if media_type == "tv" and 'season_number' in metadata_info and 'episode_number' in metadata_info:
+            season_num = metadata_info.get('season_number', 1)
+            ep_num_str = str(metadata_info['episode_number'])
+            ep_title = metadata_info.get('episode_title', f"Episode {ep_num_str}")
+            ep_title = re.sub(r'[*_`~]', '', ep_title).strip()
+            
+            header = "📺 ━━━━━━━━━━━━━━━━━━━ 📺\n⚡ **NEW EPISODE RELEASE** ⚡\n📺 ━━━━━━━━━━━━━━━━━━━ 📺"
+            info_block = (
+                f"🍿 **Series:** **{title}**\n"
+                f"📌 **Season {season_num} | Episode {ep_num_str}** ({ep_title})\n"
+                f"📅 **Year:** {year}\n"
+                f"⭐ **Rating & Review:** **{rating_display}** • {verdict}\n"
+                f"🎭 **Genres:** {genres}\n"
+                f"🔊 **Audio:** {languages}\n"
+                f"💿 **Quality:** **{qualities_str}** [{rip}]\n"
+            )
+        else:
+            header = "🎬 ━━━━━━━━━━━━━━━━━━━ 🎬\n⚡ **NEW MOVIE RELEASE** ⚡\n🎬 ━━━━━━━━━━━━━━━━━━━ 🎬"
+            runtime_line = f"⏱ **Duration:** {runtime} mins\n" if runtime and runtime > 0 else ""
+            info_block = (
+                f"🍿 **Movie:** **{title}**\n"
+                f"📅 **Release Year:** {year}\n"
+                f"⭐ **Rating & Review:** **{rating_display}** • {verdict}\n"
+                f"🎭 **Genres:** {genres}\n"
+                f"🔊 **Audio:** {languages}\n"
+                f"💿 **Quality:** **{qualities_str}** [{rip}]\n"
+                f"{runtime_line}"
+            )
+
         caption = (
-            f"🎬 **New Upload Alert!** 🎬\n\n"
-            f"{title_str}\n"
-            f"⭐️ **Rating:** {rating}/10\n"
-            f"🎭 **Genres:** {genres}\n"
-            f"🔊 **Languages:** {languages}\n"
-            f"💿 **Quality:** {qualities_str} [{rip}]\n\n"
-            f"📝 **Plot:** {description}\n\n"
-            f"🔗 **Watch/Download Online:**\n"
+            f"{header}\n\n"
+            f"{info_block}\n"
+            f"📖 **Short Story / Synopsis:**\n"
+            f"{short_story}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚡ **Direct Streaming & Fast Download:**\n"
             f"👉 {website_link}"
         )
 
         image_url = media_details.get('backdrop') or media_details.get('poster')
 
-        reply_markup = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🌐 Watch/Download Now", url=website_link)
-        ]])
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌐 Watch / Download Now", url=website_link)],
+            [InlineKeyboardButton("🔍 Search More Movies", url="https://filmy4uhd.vercel.app")]
+        ])
 
-        edited = False
-        if existing_msg_id:
+        # सभी कॉन्फ़िगर किए गए चैनल्स पर ब्रॉडकास्ट करें
+        for ch_id in target_channels:
             try:
-                if image_url:
-                    await StreamBot.edit_message_caption(
-                        chat_id=int(channel),
-                        message_id=int(existing_msg_id),
-                        caption=caption,
-                        reply_markup=reply_markup
-                    )
-                else:
-                    await StreamBot.edit_message_text(
-                        chat_id=int(channel),
-                        message_id=int(existing_msg_id),
-                        text=caption,
-                        reply_markup=reply_markup
-                    )
-                edited = True
-                LOGGER.info(f"Notification edited successfully in {channel} (Message ID: {existing_msg_id})")
-            except Exception as e:
-                LOGGER.warning(f"Failed to edit message {existing_msg_id}: {e}. Sending new message instead...")
-                existing_msg_id = None
+                existing_msg_id = get_existing_msg_id(media_details, media_type, ch_id, metadata_info)
+                edited = False
 
-        if not edited:
-            if image_url:
-                sent_msg = await StreamBot.send_photo(
-                    chat_id=int(channel),
-                    photo=image_url,
-                    caption=caption,
-                    reply_markup=reply_markup
-                )
-            else:
-                sent_msg = await StreamBot.send_message(
-                    chat_id=int(channel),
-                    text=caption,
-                    reply_markup=reply_markup,
-                    disable_web_page_preview=False
-                )
-            # Database में मैसेज ID सेव करें
-            await db.update_channel_message_id(
-                tmdb_id=tmdb_id,
-                media_type=media_type,
-                message_id=sent_msg.id,
-                season_number=metadata_info.get('season_number'),
-                episode_number=metadata_info.get('episode_number')
-            )
-            LOGGER.info(f"New notification sent successfully to {channel} for {title} (Message ID: {sent_msg.id})")
+                if existing_msg_id:
+                    try:
+                        if image_url:
+                            await StreamBot.edit_message_caption(
+                                chat_id=ch_id,
+                                message_id=int(existing_msg_id),
+                                caption=caption,
+                                reply_markup=reply_markup
+                            )
+                        else:
+                            await StreamBot.edit_message_text(
+                                chat_id=ch_id,
+                                message_id=int(existing_msg_id),
+                                text=caption,
+                                reply_markup=reply_markup
+                            )
+                        edited = True
+                        LOGGER.info(f"Notification edited successfully in {ch_id} (Message ID: {existing_msg_id})")
+                    except Exception as e:
+                        LOGGER.warning(f"Failed to edit message {existing_msg_id} in {ch_id}: {e}. Sending new message...")
+                        existing_msg_id = None
+
+                if not edited:
+                    sent_msg = None
+                    try:
+                        if image_url:
+                            sent_msg = await StreamBot.send_photo(
+                                chat_id=ch_id,
+                                photo=image_url,
+                                caption=caption,
+                                reply_markup=reply_markup
+                            )
+                        else:
+                            sent_msg = await StreamBot.send_message(
+                                chat_id=ch_id,
+                                text=caption,
+                                reply_markup=reply_markup,
+                                disable_web_page_preview=False
+                            )
+                    except Exception as e:
+                        # Markdown parsing fallback
+                        plain_caption = re.sub(r'[*_`~]', '', caption)
+                        if image_url:
+                            sent_msg = await StreamBot.send_photo(
+                                chat_id=ch_id,
+                                photo=image_url,
+                                caption=plain_caption,
+                                reply_markup=reply_markup
+                            )
+                        else:
+                            sent_msg = await StreamBot.send_message(
+                                chat_id=ch_id,
+                                text=plain_caption,
+                                reply_markup=reply_markup,
+                                disable_web_page_preview=False
+                            )
+
+                    if sent_msg:
+                        # Database में इस channel की मैसेज ID सेव करें
+                        await db.update_channel_message_id(
+                            tmdb_id=tmdb_id,
+                            media_type=media_type,
+                            message_id=sent_msg.id,
+                            channel_id=ch_id,
+                            season_number=metadata_info.get('season_number'),
+                            episode_number=metadata_info.get('episode_number')
+                        )
+                        LOGGER.info(f"New notification sent successfully to {ch_id} for {title} (Message ID: {sent_msg.id})")
+            except Exception as ch_err:
+                LOGGER.error(f"Error processing notification for channel {ch_id}: {ch_err}")
     except Exception as e:
-        LOGGER.error(f"Failed to send channel notification: {e}")
+        LOGGER.error(f"Failed to send channel notifications: {e}")
 
 
 async def debounce_notification(metadata_info):
