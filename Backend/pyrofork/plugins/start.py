@@ -10,31 +10,26 @@ from Backend.helper.encrypt import decode_string
 from Backend.helper.metadata import metadata
 from Backend.helper.pyro import apply_channel_branding, get_readable_file_size, remove_urls
 from Backend.pyrofork import StreamBot
-from pyrogram import filters, Client
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram import filters, Client  # type: ignore
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery  # type: ignore
 from os import path as ospath
-from pyrogram.errors import FloodWait
-from pyrogram.enums.parse_mode import ParseMode
-from themoviedb import aioTMDb
+from pyrogram.errors import FloodWait  # type: ignore
+from pyrogram.enums import ParseMode, ChatMemberStatus  # type: ignore
+from themoviedb import aioTMDb  # type: ignore
 from os import execl as osexecl
 from asyncio import create_subprocess_exec, gather
 from sys import executable
-from aiofiles import open as aiopen
-from pyrogram import enums
+from aiofiles import open as aiopen  # type: ignore
+from pyrogram import enums  # type: ignore
 import random
 import string
-from passlib.context import CryptContext
+from passlib.context import CryptContext  # type: ignore
 from datetime import datetime, timedelta
 
 try:
     tmdb = aioTMDb(api_key=Telegram.TMDB_API, language="en-US", region="US")
 except TypeError:
     tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
-# Initialize database connection
-import random
-import string
-from passlib.context import CryptContext
-from datetime import datetime, timedelta
 
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -148,7 +143,6 @@ async def is_user_joined(bot: Client, user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(channel, user_id)
         # Banned/left users ko block karo
-        from pyrogram.enums import ChatMemberStatus
         if member.status in [
             ChatMemberStatus.BANNED,
             ChatMemberStatus.LEFT,
@@ -412,11 +406,110 @@ async def start(bot: Client, message: Message):
             reget_url = f"https://t.me/{bot_username}?start={command_part}"
             create_task(delete_messages_after_delay(sent_messages, message.chat.id, reget_url))
     else:
+        user_name = message.from_user.first_name if message.from_user else "Movie Lover"
         bot_uname = (bot.me.username if bot.me and bot.me.username else "Filmy4uhdbot").lstrip('@')
+        welcome_text = (
+            f"🎬 **Welcome to @{bot_uname}, {user_name}!** ✨\n\n"
+            "🍿 **Your Ultimate Destination for HD Movies & Web Series!**\n\n"
+            "⚡ **Bot Features:**\n"
+            "• 🚀 **Direct High-Speed Download Links**\n"
+            "• 📺 **Buffer-Free Online Streaming Player**\n"
+            "• 🎧 **Multi-Audio (Hindi, Dual Audio, South, English)**\n"
+            "• 📱 **Available in 480p, 720p, 1080p & 4K Quality**\n\n"
+            "🌐 **Official Website:** [filmy4uhd.vercel.app](https://filmy4uhd.vercel.app)\n\n"
+            "👇 *Click below to explore our website or get help:*"
+        )
+        buttons = [
+            [
+                InlineKeyboardButton("🌐 Visit Website", url="https://filmy4uhd.vercel.app"),
+                InlineKeyboardButton("🔍 Search Movies", url="https://filmy4uhd.vercel.app/search")
+            ]
+        ]
+        if Telegram.CHANNEL_USERNAME:
+            chan_user = str(Telegram.CHANNEL_USERNAME).lstrip('@')
+            buttons.append([
+                InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{chan_user}")
+            ])
+        buttons.append([
+            InlineKeyboardButton("📖 How To Use", callback_data="help_user"),
+            InlineKeyboardButton("⚡ Bot Status", callback_data="status_user")
+        ])
         await message.reply_text(
-            f"Welcome to @{bot_uname}! 🎬\n\n"
-            "I am here to provide direct download links for movies & series from filmy4uhd.vercel.app .\n"
-            "📥 Just send a file link to get started!"
+            welcome_text,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@StreamBot.on_callback_query(filters.regex("^(help_user|status_user|back_home)$"))
+async def start_callbacks(bot: Client, query: CallbackQuery):
+    data = query.data
+    bot_uname = (bot.me.username if bot.me and bot.me.username else "Filmy4uhdbot").lstrip('@')
+    user_name = query.from_user.first_name if query.from_user else "Movie Lover"
+
+    if data == "help_user":
+        help_text = (
+            "📖 **How To Use This Bot & Website:**\n\n"
+            "1️⃣ Open our official website: [filmy4uhd.vercel.app](https://filmy4uhd.vercel.app)\n"
+            "2️⃣ Search for any Movie or Web Series.\n"
+            "3️⃣ Click on **'Download'** or **'Watch Online'** on your desired quality.\n"
+            "4️⃣ The website will redirect you here, and the bot will instantly deliver your direct fast link and player!\n\n"
+            "💡 *Tip: Make sure you have joined our updates channel to stay updated on new releases!*"
+        )
+        buttons = [[InlineKeyboardButton("🔙 Back to Home", callback_data="back_home")]]
+        await query.message.edit_text(help_text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN)
+
+    elif data == "status_user":
+        from time import time
+        from Backend import StartTime, __version__
+        from Backend.helper.pyro import get_readable_time
+        from Backend.pyrofork import multi_clients, work_loads
+
+        status_text = (
+            "⚡ **System & Bot Status:**\n\n"
+            f"🤖 **Bot Name:** @{bot_uname}\n"
+            f"🟢 **Server Status:** Online & Operational\n"
+            f"⏱️ **Uptime:** {get_readable_time(time() - StartTime)}\n"
+            f"🚀 **CDN Stream Workers:** {len(multi_clients)} active bots\n"
+            f"📦 **Version:** v{__version__}\n"
+            f"🌐 **Website:** [filmy4uhd.vercel.app](https://filmy4uhd.vercel.app)"
+        )
+        buttons = [[InlineKeyboardButton("🔙 Back to Home", callback_data="back_home")]]
+        await query.message.edit_text(status_text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN)
+
+    elif data == "back_home":
+        welcome_text = (
+            f"🎬 **Welcome to @{bot_uname}, {user_name}!** ✨\n\n"
+            "🍿 **Your Ultimate Destination for HD Movies & Web Series!**\n\n"
+            "⚡ **Bot Features:**\n"
+            "• 🚀 **Direct High-Speed Download Links**\n"
+            "• 📺 **Buffer-Free Online Streaming Player**\n"
+            "• 🎧 **Multi-Audio (Hindi, Dual Audio, South, English)**\n"
+            "• 📱 **Available in 480p, 720p, 1080p & 4K Quality**\n\n"
+            "🌐 **Official Website:** [filmy4uhd.vercel.app](https://filmy4uhd.vercel.app)\n\n"
+            "👇 *Click below to explore our website or get help:*"
+        )
+        buttons = [
+            [
+                InlineKeyboardButton("🌐 Visit Website", url="https://filmy4uhd.vercel.app"),
+                InlineKeyboardButton("🔍 Search Movies", url="https://filmy4uhd.vercel.app/search")
+            ]
+        ]
+        if Telegram.CHANNEL_USERNAME:
+            chan_user = str(Telegram.CHANNEL_USERNAME).lstrip('@')
+            buttons.append([
+                InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{chan_user}")
+            ])
+        buttons.append([
+            InlineKeyboardButton("📖 How To Use", callback_data="help_user"),
+            InlineKeyboardButton("⚡ Bot Status", callback_data="status_user")
+        ])
+        await query.message.edit_text(
+            welcome_text,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+            parse_mode=ParseMode.MARKDOWN
         )
 
 
@@ -436,6 +529,8 @@ async def help_command(bot: Client, message: Message):
                 "ℹ️ **/help** - Show this help message.\n\n"
                 "⚙️ **Admin Commands (Owner Only):**\n"
                 "👤 **/user `<username> <expiry_days>`** - Create a temporary user.\n"
+                "📂 **/index** - Auto-index all AUTH_CHANNELs, `/index <chat_id>`, or reply to a channel post.\n"
+                "🛑 **/cancel_index** - Stop ongoing channel indexing.\n"
                 "♻️ **/restart** - Update code from GitHub and restart the bot.\n"
                 "📋 **/log** - Get the system log file (`log.txt`).\n"
                 "💬 **/caption** - Toggle Caption vs Filename mode for indexing.\n"
@@ -730,7 +825,261 @@ async def file_receive_handler(bot: Client, message: Message):
         await message.reply(text="> Channel is not in AUTH_CHANNEL")
 
 
-@Client.on_message(filters.command('caption') & filters.private & CustomFilters.owner)
+# ==============================================================================
+# 🚀 AUTOMATIC & MANUAL CHANNEL INDEXING SYSTEM
+# ==============================================================================
+
+indexing_state = {
+    "is_running": False,
+    "current_channel": None,
+    "total_found": 0,
+    "indexed": 0,
+    "skipped": 0,
+    "cancel_requested": False
+}
+
+async def index_single_message(bot: Client, message: Message, send_notification: bool = False) -> bool:
+    """Helper to parse and index a single Telegram video/document into MongoDB."""
+    if not (message.video or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/"))):
+        return False
+    file = message.video or message.document
+    if not file:
+        return False
+
+    if Telegram.USE_CAPTION and message.caption:
+        title = message.caption.replace("\n", "\\n")
+    else:
+        title = file.file_name or file.file_id
+
+    if not title:
+        return False
+
+    msg_id = message.id
+    f_hash = file.file_unique_id[:6]
+    size = get_readable_file_size(file.file_size)
+    channel = str(message.chat.id).replace("-100", "")
+
+    metadata_info = await metadata(title, file)
+    if not metadata_info:
+        return False
+
+    title = apply_channel_branding(title)
+    if not title.endswith(('.mkv', '.mp4')):
+        title += '.mkv'
+
+    async with db_lock:
+        updated_id = await db.insert_media(
+            metadata_info,
+            hash=f_hash,
+            channel=int(channel),
+            msg_id=msg_id,
+            size=size,
+            name=title
+        )
+        if updated_id and send_notification:
+            await debounce_notification(metadata_info)
+        return bool(updated_id)
+
+
+async def scan_and_index_channel(bot: Client, channel_id: int, start_msg_id: int = 0, progress_msg: Optional[Message] = None):
+    """Scans all messages from channel_id and indexes them into the database."""
+    global indexing_state
+    indexing_state["is_running"] = True
+    indexing_state["current_channel"] = channel_id
+    indexing_state["cancel_requested"] = False
+    indexing_state["indexed"] = 0
+    indexing_state["skipped"] = 0
+    indexing_state["total_found"] = 0
+
+    try:
+        chat = await bot.get_chat(channel_id)
+        chat_title = chat.title or str(channel_id)
+    except Exception:
+        chat_title = str(channel_id)
+
+    LOGGER.info(f"Starting channel indexing for '{chat_title}' ({channel_id}) from msg_id {start_msg_id}...")
+
+    last_processed_id = start_msg_id
+    from time import time
+    last_edit_time = time()
+    total_processed = 0
+
+    try:
+        async for msg in bot.get_chat_history(channel_id):
+            if indexing_state["cancel_requested"]:
+                LOGGER.info("Indexing cancelled by user request.")
+                break
+
+            if start_msg_id > 0 and msg.id <= start_msg_id:
+                break
+
+            if msg.video or (msg.document and msg.document.mime_type and msg.document.mime_type.startswith("video/")):
+                indexing_state["total_found"] += 1
+                try:
+                    success = await index_single_message(bot, msg, send_notification=False)
+                    if success:
+                        indexing_state["indexed"] += 1
+                    else:
+                        indexing_state["skipped"] += 1
+                except Exception as ex:
+                    LOGGER.error(f"Error indexing message {msg.id}: {ex}")
+                    indexing_state["skipped"] += 1
+
+            total_processed += 1
+            if msg.id > last_processed_id:
+                last_processed_id = msg.id
+
+            if progress_msg and (time() - last_edit_time > 4):
+                last_edit_time = time()
+                try:
+                    await progress_msg.edit_text(
+                        f"🔄 **Indexing in Progress...**\n\n"
+                        f"📢 **Channel:** `{chat_title}`\n"
+                        f"📥 **Scanned Messages:** {total_processed}\n"
+                        f"🎬 **Media Found:** {indexing_state['total_found']}\n"
+                        f"✅ **Added / Updated:** {indexing_state['indexed']}\n"
+                        f"⚠️ **Skipped:** {indexing_state['skipped']}\n\n"
+                        f"🛑 *Send `/cancel_index` to stop anytime.*",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    pass
+
+        if db.db is not None and last_processed_id > 0:
+            try:
+                await db.db["channel_tracker"].update_one(
+                    {"channel_id": channel_id},
+                    {"$set": {"last_msg_id": last_processed_id, "updated_at": datetime.utcnow()}},
+                    upsert=True
+                )
+            except Exception as e:
+                LOGGER.error(f"Failed to update channel_tracker in DB: {e}")
+
+    except FloodWait as fw:
+        LOGGER.warning(f"FloodWait of {fw.value}s encountered during channel indexing.")
+        await asleep(fw.value)
+    except Exception as e:
+        LOGGER.error(f"Error in scan_and_index_channel: {e}")
+    finally:
+        indexing_state["is_running"] = False
+
+    return chat_title, indexing_state["indexed"], indexing_state["skipped"], indexing_state["total_found"]
+
+
+async def auto_index_channels():
+    """Background startup task: automatically catches up on missed channel messages after restart."""
+    await asleep(15)
+    if not Telegram.AUTH_CHANNEL:
+        return
+
+    LOGGER.info("Starting background catch-up indexing for AUTH_CHANNELs...")
+    for ch in Telegram.AUTH_CHANNEL:
+        try:
+            ch_id = int(ch.strip())
+            last_id = 0
+            if db.db is not None:
+                doc = await db.db["channel_tracker"].find_one({"channel_id": ch_id})
+                if doc:
+                    last_id = doc.get("last_msg_id", 0)
+            await scan_and_index_channel(StreamBot, ch_id, start_msg_id=last_id)
+        except Exception as e:
+            LOGGER.warning(f"Auto-index failed for channel {ch}: {e}")
+    LOGGER.info("Auto-indexing for AUTH_CHANNELs completed.")
+
+
+try:
+    asyncio.get_running_loop().create_task(auto_index_channels())
+except RuntimeError:
+    pass
+
+
+@StreamBot.on_message(filters.command(['index']) & filters.private & CustomFilters.owner)
+async def manual_index_command(bot: Client, message: Message):
+    """
+    Owner command to index:
+    - Replied message's channel
+    - Specific channel ID or @username (/index <channel>)
+    - All AUTH_CHANNELs (/index)
+    """
+    target_chat_id = None
+    start_id = 0
+
+    if message.reply_to_message:
+        rep = message.reply_to_message
+        if rep.forward_from_chat:
+            target_chat_id = rep.forward_from_chat.id
+            start_id = rep.forward_from_message_id or 0
+        elif rep.sender_chat:
+            target_chat_id = rep.sender_chat.id
+            start_id = rep.id
+
+    args = message.text.split()
+    if not target_chat_id and len(args) > 1:
+        target_str = args[1].strip()
+        try:
+            if target_str.startswith("-100") or target_str.startswith("-") or target_str.isdigit():
+                target_chat_id = int(target_str)
+            else:
+                chat_obj = await bot.get_chat(target_str)
+                target_chat_id = chat_obj.id
+        except Exception as e:
+            await message.reply_text(f"❌ Could not access channel `{target_str}`: {e}\n*Make sure bot is added as Admin in the channel.*", parse_mode=ParseMode.MARKDOWN)
+            return
+
+    if indexing_state["is_running"]:
+        await message.reply_text("⚠️ An indexing task is already running! Send `/cancel_index` to stop it.")
+        return
+
+    if not target_chat_id:
+        if not Telegram.AUTH_CHANNEL:
+            await message.reply_text("❌ No target channel specified and `AUTH_CHANNEL` list is empty in config.")
+            return
+
+        status_msg = await message.reply_text("🔄 **Starting Indexing for all configured AUTH_CHANNELs...**", parse_mode=ParseMode.MARKDOWN)
+        total_indexed = 0
+        total_found = 0
+        for ch in Telegram.AUTH_CHANNEL:
+            try:
+                ch_id = int(ch.strip())
+                title, indexed, skipped, found = await scan_and_index_channel(bot, ch_id, progress_msg=status_msg)
+                total_indexed += indexed
+                total_found += found
+            except Exception as ex:
+                LOGGER.error(f"Error indexing {ch}: {ex}")
+
+        await status_msg.edit_text(
+            f"✅ **All AUTH_CHANNELs Indexed Successfully!**\n\n"
+            f"🎬 **Total Media Scanned:** {total_found}\n"
+            f"📥 **Added to Database:** {total_indexed}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    status_msg = await message.reply_text(f"⏳ **Connecting to channel `{target_chat_id}` to start indexing...**", parse_mode=ParseMode.MARKDOWN)
+    try:
+        title, indexed, skipped, total = await scan_and_index_channel(bot, target_chat_id, start_msg_id=start_id, progress_msg=status_msg)
+        await status_msg.edit_text(
+            f"🎉 **Channel Indexing Completed!**\n\n"
+            f"📢 **Channel:** `{title}`\n"
+            f"🎬 **Media Scanned:** {total}\n"
+            f"✅ **Added / Updated in Database:** {indexed}\n"
+            f"⚠️ **Skipped:** {skipped}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Indexing failed: {e}")
+
+
+@StreamBot.on_message(filters.command(['cancel_index']) & filters.private & CustomFilters.owner)
+async def cancel_index_command(bot: Client, message: Message):
+    if indexing_state["is_running"]:
+        indexing_state["cancel_requested"] = True
+        await message.reply_text("🛑 **Indexing cancellation requested. It will stop in a few seconds.**")
+    else:
+        await message.reply_text("ℹ️ No indexing task is currently running.")
+
+
+@StreamBot.on_message(filters.command('caption') & filters.private & CustomFilters.owner)
 async def toggle_caption(bot: Client, message: Message):
     try:
         Telegram.USE_CAPTION = not Telegram.USE_CAPTION
