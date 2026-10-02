@@ -26,7 +26,10 @@ import string
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
-tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
+try:
+    tmdb = aioTMDb(api_key=Telegram.TMDB_API, language="en-US", region="US")
+except TypeError:
+    tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
 # Initialize database connection
 import random
 import string

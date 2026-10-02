@@ -14,7 +14,10 @@ from typing import Union, Tuple, Optional
 
 DELAY = 2
 
-tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
+try:
+    tmdb = aioTMDb(api_key=Telegram.TMDB_API, language="en-US", region="US")
+except TypeError:
+    tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
 
 
 def extract_season_and_episode(cleaned_filename: str, parsed: dict) -> Tuple[Optional[int], Optional[Union[int, str]]]:
