@@ -412,9 +412,10 @@ async def start(bot: Client, message: Message):
             reget_url = f"https://t.me/{bot_username}?start={command_part}"
             create_task(delete_messages_after_delay(sent_messages, message.chat.id, reget_url))
     else:
+        bot_uname = (bot.me.username if bot.me and bot.me.username else "Filmy4uhdbot").lstrip('@')
         await message.reply_text(
-            "Welcome to @Filmy4uhdbot! 🎬\n\n"
-            "I am here to provide direct download links for movies & series from filmy4uhd.site .\n"
+            f"Welcome to @{bot_uname}! 🎬\n\n"
+            "I am here to provide direct download links for movies & series from filmy4uhd.vercel.app .\n"
             "📥 Just send a file link to get started!"
         )
 
