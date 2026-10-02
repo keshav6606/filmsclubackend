@@ -33,7 +33,10 @@ stream_handler.setFormatter(formatter)
 basicConfig(handlers=[file_handler, stream_handler], level=INFO)
 
 # Load environment variables
-load_dotenv("config.env")
+if ospath.exists("config.env"):
+    load_dotenv("config.env")
+elif ospath.exists("sample_config.env"):
+    load_dotenv("sample_config.env")
 UPSTREAM_REPO = environ.get("UPSTREAM_REPO", "").strip() or None
 UPSTREAM_BRANCH = environ.get("UPSTREAM_BRANCH", "").strip() or "main"
 

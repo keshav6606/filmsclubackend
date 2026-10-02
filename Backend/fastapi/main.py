@@ -17,7 +17,7 @@ import math
 from Backend.logger import LOGGER
 from Backend.config import Telegram
 from Backend.pyrofork import StreamBot, work_loads, multi_clients
-from Backend.helper.exceptions import InvalidHash
+from Backend.helper.exceptions import InvalidHash, FIleNotFound
 from Backend.helper.custom_dl import ByteStreamer
 from fastapi.middleware.cors import CORSMiddleware
 from Backend.helper.pyro import get_readable_time
@@ -47,11 +47,21 @@ async def get_bot_workloads():
     """
     Home route to list each bot's workload and total number of bots.
     """
+    bot_username = getattr(StreamBot, "username", None)
+    if not bot_username:
+        bot_me = getattr(StreamBot, "me", None)
+        if bot_me and getattr(bot_me, "username", None):
+            bot_username = bot_me.username
+
+    connected_count = len([c for c in multi_clients.values() if getattr(c, 'is_connected', False)])
+    if getattr(StreamBot, 'is_connected', False) and 0 not in multi_clients:
+        connected_count += 1
+
     response = {
             "server_status": "running",
             "uptime": get_readable_time(time() - StartTime),
-            "telegram_bot": "@" + StreamBot.username,
-            "connected_bots": len(multi_clients),
+            "telegram_bot": f"@{bot_username}" if bot_username else "@NotConnected",
+            "connected_bots": connected_count if connected_count > 0 else len(multi_clients),
             "loads": dict(
                 ("bot" + str(c + 1), l)
                 for c, (_, l) in enumerate(
@@ -281,8 +291,36 @@ async def stream_handler(request: Request, id: str, name: str, dl: Optional[int]
 
 async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: str, disposition: str = "inline"):
     range_header = request.headers.get("Range", 0)
-    index = min(work_loads, key=work_loads.get)
-    faster_client = multi_clients[index]
+
+    if not work_loads or not multi_clients:
+        LOGGER.error("Streaming error: No bot clients are currently available or connected.")
+        raise HTTPException(
+            status_code=503,
+            detail="Streaming service unavailable: No active Telegram bot clients connected. Please verify bot tokens."
+        )
+
+    # Prefer clients that are currently connected
+    active_loads = {k: v for k, v in work_loads.items() if k in multi_clients and getattr(multi_clients[k], 'is_connected', False)}
+    if not active_loads:
+        active_loads = {k: v for k, v in work_loads.items() if k in multi_clients}
+
+    if not active_loads:
+        LOGGER.error("Streaming error: No available clients found in multi_clients.")
+        raise HTTPException(
+            status_code=503,
+            detail="Streaming service unavailable: No connected bot clients found."
+        )
+
+    try:
+        index = min(active_loads, key=active_loads.get)
+        faster_client = multi_clients[index]
+    except (ValueError, KeyError) as e:
+        LOGGER.error(f"Failed to select client from workloads: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Streaming service unavailable: Bot client selection failed."
+        )
+
     if Telegram.MULTI_CLIENT:
         LOGGER.debug(f"Client {index} is now serving {request.client.host}")
     if faster_client in class_cache:
@@ -293,11 +331,17 @@ async def media_streamer(request: Request, chat_id: int, id: int, secure_hash: s
         tg_connect = ByteStreamer(faster_client)
         class_cache[faster_client] = tg_connect
     LOGGER.debug("before calling get_file_properties")
-    file_id = await tg_connect.get_file_properties(chat_id=chat_id, message_id=id)
+    try:
+        file_id = await tg_connect.get_file_properties(chat_id=chat_id, message_id=id)
+    except FIleNotFound:
+        raise HTTPException(status_code=404, detail="File not found in storage channel")
+    except Exception as e:
+        LOGGER.error(f"Error fetching file properties: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch file from Telegram: {str(e)}")
     LOGGER.debug("after calling get_file_properties")
     if file_id.unique_id[:6] != secure_hash:
         LOGGER.debug(f"Invalid hash for message with ID {id}")
-        raise InvalidHash
+        raise HTTPException(status_code=400, detail="Invalid secure hash")
     file_size = file_id.file_size
     if range_header:
         from_bytes, until_bytes = range_header.replace("bytes=", "").split("-")

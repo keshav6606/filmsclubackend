@@ -18,23 +18,41 @@ async def start_telegram():
         await db.connect()
         await asleep(1.2)
 
-        while True:
-            try:
-                await StreamBot.start()
-                break
-            except FloodWait as e:
-                LOGGER.warning(f"FloodWait of {e.value} seconds encountered for StreamBot. Sleeping for {e.value + 5} seconds...")
-                await asleep(e.value + 5)
+        stream_bot_started = False
+        try:
+            while True:
+                try:
+                    await StreamBot.start()
+                    stream_bot_started = True
+                    break
+                except FloodWait as e:
+                    LOGGER.warning(f"FloodWait of {e.value} seconds encountered for StreamBot. Sleeping for {e.value + 5} seconds...")
+                    await asleep(e.value + 5)
+        except Exception as e:
+            LOGGER.error(f"Failed to start primary StreamBot (token may be invalid/revoked): {e}")
 
-        StreamBot.username = StreamBot.me.username
-        LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
+        if stream_bot_started and getattr(StreamBot, "me", None):
+            StreamBot.username = StreamBot.me.username
+            LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
+        else:
+            StreamBot.username = None
+            LOGGER.warning("Primary StreamBot is offline. Multi-clients will handle streaming if available.")
 
         await asleep(1.2)
         LOGGER.info("Initializing Multi Clients...")
-        await initialize_clients()
+        try:
+            await initialize_clients()
+        except Exception as e:
+            LOGGER.error(f"Error initializing multi-clients: {e}")
 
-        await restart_notification()
-        LOGGER.info("Project-S Telegram clients started successfully!")
+        if stream_bot_started:
+            try:
+                await restart_notification()
+            except Exception as e:
+                LOGGER.error(f"Error sending restart notification: {e}")
+            LOGGER.info("Project-S Telegram clients started successfully!")
+        else:
+            LOGGER.info("Project-S multi-clients started (primary StreamBot offline)!")
     except Exception:
         LOGGER.error("Error starting Telegram clients:\n" + format_exc())
 

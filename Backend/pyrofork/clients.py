@@ -38,20 +38,34 @@ async def start_client(client_id, token):
         return None
 
 async def initialize_clients():
-    multi_clients[0], work_loads[0] = StreamBot, 0
+    if getattr(StreamBot, "is_connected", False):
+        multi_clients[0], work_loads[0] = StreamBot, 0
+    else:
+        LOGGER.warning("Primary StreamBot is not connected. Skipping adding it to multi_clients[0].")
+
     all_tokens = TokenParser.parse_from_env()
     if not all_tokens:
-        LOGGER.info("No additional Bot Clients found, Using default client")
+        if not multi_clients:
+            LOGGER.error("No Telegram bot clients available! Both primary and multi tokens missing or failed.")
+        else:
+            LOGGER.info("No additional Bot Clients found, using default client")
         return
 
-    tasks = [create_task(start_client(i, token)) for i, token in all_tokens.items()]
-    clients = await gather(*tasks)
-    clients = {client_id: client for client_id, client in clients if client}  # Filter out None values
-    multi_clients.update(clients)
-    
-    if len(multi_clients) != 1:
+    tasks = [
+        create_task(start_client(i, token)) 
+        for i, token in all_tokens.items() 
+        if token != Telegram.BOT_TOKEN
+    ]
+    if tasks:
+        clients = await gather(*tasks)
+        clients = {client_id: client for client_id, client in clients if client}  # Filter out None values
+        multi_clients.update(clients)
+
+    if len(multi_clients) > 1:
         Telegram.MULTI_CLIENT = True
         LOGGER.info(f"Multi-Client Mode Enabled with {len(multi_clients)} clients")
+    elif len(multi_clients) == 1:
+        LOGGER.info(f"1 client active and ready to serve (Client ID: {list(multi_clients.keys())[0]})")
     else:
-        LOGGER.info("No additional clients were initialized, using default client")
+        LOGGER.error("CRITICAL: No bot clients could be started! File streaming will not work.")
 
