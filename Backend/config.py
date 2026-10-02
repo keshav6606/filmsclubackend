@@ -15,7 +15,7 @@ class Telegram:
     DATABASE = getenv("DATABASE", "mongodb+srv://Keshav:Keshav@cluster0.ndw3zfh.mongodb.net/?appName=Cluster0").split(", ")
     TMDB_API = getenv("TMDB_API", "f9dbeb078807efcbb1e3a72cd80881b3")
     IMDB_API = getenv("IMDB_API", "https://imdb-api-lux.wemedia360.workers.dev/").rstrip('/')
-    UPSTREAM_REPO = getenv("UPSTREAM_REPO", "https://keshav6606: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@github.com/keshav6606/filmsclub-backend")
+    UPSTREAM_REPO = getenv("UPSTREAM_REPO", "https://github.com/keshav6606/filmsclubackend")
     UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "main")
     MULTI_CLIENT = getenv("MULTI_CLIENT", "False").lower() == "true"
     USE_CAPTION = getenv("USE_CAPTION", "False").lower() == "true"
